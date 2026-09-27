@@ -230,6 +230,7 @@
     tg.dispatchEvent(new W.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
   }
   function typeInto(el, text) {
+    if (D.activeElement !== el) el.focus();   // key('Enter') 等发给 D.activeElement，先让输入框获得焦点
     el.value = text;
     el.dispatchEvent(new W.Event('input', { bubbles: true }));
   }
@@ -346,7 +347,10 @@
        click() / press() / release()  —— 在指针处派发 pointer/mouse/click 事件
        typeAt(t0, el, text, dt)       —— 逐字输入（input 事件 + 每字 key cue）；key('Escape') 发 keydown
        shot(a, b, fn(t) => camSpec)   —— 在 [a,b] 内定义镜头（相机位置/缩放/旋转）
-       title(a, b, html, opts)        —— 在 [a,b] 内显示一段标题/字幕
+       title(a, b, html, opts)        —— 在 [a,b] 内显示一段标题/字幕。opts：
+                                           cls 'title'（居中大标题，副标写 <span class="en">EN</span>）/ 'title side'（左侧，特写时不压主体）
+                                           / 'caption'（左下字幕，须同时 kind:'caption'，小字标签写 <small>EN</small>）/ 'stat'（kind:'stat'）；
+                                           style（如 {top:'640px', fontSize:'110px'}）、fi/fo 淡入淡出秒数、s0/drift/ls0/ls1 缩放与字距
        RATE                           —— [t, rate] 数组，控制被展示页面内部“时间流速”（慢动作）
        fx.xxx                         —— 在 during() 里写景深/动态模糊/黑边/闪光等参数
        cue(type, extra)               —— 记一个音效提示点，供 audio.py 生成配乐
@@ -396,7 +400,8 @@
   });
 
   /* ================= 结尾字幕（通用，from 到 DURATION 淡入并保持；END 必须留在剧本块外） ================= */
-  const END = { from: DURATION - 2, text: 'build by <span class="acc">Model</span>' };
+  // 冒烟剧本不需要结尾卡：用 SMOKE ? DURATION + 1 : ...，否则 3 s 冒烟在 1 s 就黑场
+  const END = { from: SMOKE ? DURATION + 1 : DURATION - 2, text: 'build by <span class="acc">Model</span>' };
   const CURSOR_UNTIL = DURATION;
   function drawEnd(t) {
     const a = END.from, b = a + .3;

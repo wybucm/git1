@@ -40,7 +40,9 @@ pip install -q numpy scipy imageio-ffmpeg && $V/fetch-fonts.sh
 - **被展示页面的视口是 1440×810**（导演页 `#rig`/`#app` 的尺寸），剧本里的指针坐标、镜头 `{x,y}` 都是这个视口里的 CSS 像素；新做的页面按这个尺寸设计，不要出现滚动条。
 - 导演页往 iframe 注入的是 `:root{--font: Inter, "Noto Sans SC", sans-serif}`：页面的 `font-family` 要写成 `var(--font)` 才会换成下载的字体（否则用系统字体，容易出方块字）。
 
-下文命令里的 `video/` 都指 `$V`。
+下文命令都在 `$V` 的上一级目录（即默认 `ROOT`）里执行，命令里的 `video/` 就是 `$V` 相对这一级的路径（`$V=demo-app2/video` 时先 `cd demo-app2`，仍写 `video/...`）。环境验证通过后可删掉 `$V/demo.html`，免得把示例页一起提交。
+
+**量坐标**（写 SPEC 镜头 `{x,y}` 和指针路径要用）：在冒烟分支里 `at(.1, () => console.log(JSON.stringify(Object.fromEntries(['#a', '.b'].map(s => [s, rect(q(s))])))))`，用 `--no-video --to 1` 渲染，从 stderr 的 `[page]` 行读 1440×810 视口里的 CSS 像素。
 
 `render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，只缩小输出视频> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
 
@@ -52,7 +54,7 @@ pip install -q numpy scipy imageio-ffmpeg && $V/fetch-fonts.sh
 3. **低分辨率关键帧预览**：`node video/render.mjs --no-video --stills 1,5.5,11.8,...`（`--no-video` 不会覆盖 cues.json），再拼成一张图看构图、标题是否压主体：
    `"$FFMPEG" -pattern_type glob -i 'video/out/stills/*.jpg' -vf "scale=480:-1,tile=4x3" -frames:v 1 video/out/contact.jpg`
    注意：`--stills` 仍要从 0 跑到最后一个 still（状态是累积的），只是不编码视频。
-4. **全片渲染**：`./video/make.sh`（或单独 `node video/render.mjs`）。1080p 约 0.3 s/帧，58 s×30 fps ≈ 10 分钟 —— 用 `run_in_background` 启动，等完成通知，**不要**写 sleep/until 轮询。
+4. **全片渲染**：`NAME=<SPEC 的输出名> MAX_DURATION=<秒> EXPECT_TRANSITION=<关键过渡秒数> video/make.sh`（渲染→音频→混流→分享版→check.py 一步完成，第 5–7 步不用再单独跑；也可单独 `node video/render.mjs`）。1080p 约 0.3 s/帧，58 s×30 fps ≈ 10 分钟 —— 用 `run_in_background` 启动，等完成通知，**不要**写 sleep/until 轮询。
 5. **音频**：`python3 video/audio.py video/out/cues.json video/out/audio.wav`（节拍表 `SECTIONS`/`HITS` 从 SPEC 的音乐段落抄）。
 6. **混流**：make.sh 输出 `out/$NAME.mp4`（AAC 256k）和分享版 `out/$NAME-share.mp4`。
 7. **自查**：跑下面的清单。
@@ -104,7 +106,7 @@ check.py 管不到的，仍需人工看静帧（先缩小再看）：
 1. **看类名**：写一个 2–3 秒的小剧本只做一次拖拽，`--no-video --stills 1.9,2.5,3.1` 截几张图，同时在剧本里 `during(1.8, 3.2, () => console.log(D.body.innerHTML.length, [...D.querySelectorAll('[class]')].filter(e => /drag|ghost|lift|drop|placeholder/i.test(e.className)).map(e => e.className)))`，render.mjs 会把页面 console 以 `[page]` 前缀转发到 stderr。
 2. **或挂 MutationObserver**：在 `ready` 之后 `new W.MutationObserver(ms => ms.forEach(m => console.log(T.toFixed(3), m.type, m.target.className, m.attributeName || [...m.addedNodes].map(n => n.className)))).observe(D.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] })`，从 `[page]` 日志里找出拿起/落位/占位换位对应的类或节点增删，确认后删掉。
 
-非拖拽页面（点击弹层、开关、输入）同样按状态转换打 cue，例如 `#sheet` 加上 `.open` → `pop`、开关加上 `.on` → `toggleStart`、过渡结束 → `toggle`。过渡结束在 DOM 上没有痕迹时，可以在页面里用 `transitionend` 写一个标记（如 `body.dataset.settled`）供 observe() 读取——这正是要验证的"合成器动画跟随虚拟时间"。成对的 `<x>Start`/`<x>` 会被 check.py 自动检查。新 cue 类型要在 audio.py 的 `SFX` 里加映射，否则被跳过并打印 `unknown cue type`。
+非拖拽页面（点击弹层、开关、输入）同样按状态转换打 cue，例如 `#sheet` 加上 `.open` → `pop`、开关加上 `.on` → `toggleStart`、过渡结束 → `toggle`。过渡结束在 DOM 上没有痕迹时，可以在页面里用 `transitionend` 写一个标记（如 `body.dataset.settled`）供 observe() 读取——这正是要验证的"合成器动画跟随虚拟时间"。成对的 `<x>Start`/`<x>` 会被 check.py 自动检查。新 cue 类型要在 audio.py 的 `SFX` 里加映射，否则被跳过并打印 `unknown cue type`；模板已有：`click grab lift flip dropStart drop whoosh slowdown speedup impact end key enter tick tool swish cut pop check swatch hit riser section`，`<x>Start`/`<x>` 可以直接复用（如 `toggleStart` → `_sfx_click`，`toggle` → `_sfx_drop`）。标记在点击时先删掉、过渡结束再写回的，只在它 false→true 的那一帧打 `<x>`。
 
 `slowdown`/`speedup`/`whoosh`/`end` 这类跟速度坡度或剪辑点走的 cue 不是 DOM 状态，直接在剧本里 `at(t, () => cue('slowdown'))` 手打，时间取 SPEC 分镜表。
 

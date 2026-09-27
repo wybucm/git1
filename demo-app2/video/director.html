@@ -421,10 +421,10 @@
     /* ---------- 7.6–8.5s：拉远收尾 + 居中标题，隐藏指针 ---------- */
     shot(7.6, DURATION, (t) => {
       const k = seg(t, 7.6, 8.3, E.outExpo);
-      return mix({ x: 1230, y: 110, z: 2.4, rx: 8, ry: -10, rz: -1 }, { x: 720, y: 405, z: 1.0, rx: 14, ry: 6, rz: 2 }, k);
+      return mix({ x: 1230, y: 110, z: 2.4, rx: 8, ry: -10, rz: -1 }, { x: 720, y: 500, z: .8, rx: 14, ry: 6, rz: 2 }, k);
     });
     at(7.6, () => { ptr.visible = false; cue('whoosh'); });   // 手打
-    title(7.75, 8.5, '专注，从一个番茄开始。<span class="en">ONE TOMATO AT A TIME</span>', { style: { top: '400px', fontSize: '120px' } });
+    title(7.75, 8.5, '专注，从一个番茄开始。<span class="en">ONE TOMATO AT A TIME</span>', { style: { top: '840px', fontSize: '88px' } });
     during(7.6, 8.5, t => { fx.glowC = .6; });
 
     /* ---------- 8.5–10s：结尾字幕（黑底结尾卡，见 END） ---------- */

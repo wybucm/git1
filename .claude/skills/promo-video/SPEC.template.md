@@ -45,6 +45,8 @@
 | --- | --- | --- |
 | | | |
 
+`HITS`（单次强调，boom/braam/riser/tapestop/whoosh）：`[(t, 'boom'), ...]` 或"无"。
+
 ## 4. 开场与结尾文案（逐字）
 
 - 开场：
