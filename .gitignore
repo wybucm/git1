@@ -4,3 +4,4 @@ video/out/
 *.wav
 __pycache__/
 .smoke/
+/out/
