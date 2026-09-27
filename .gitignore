@@ -1,0 +1,8 @@
+# 宣传片渲染产物（不提交）
+video/out/
+**/video/out/
+*.mp4
+*.wav
+__pycache__/
+.smoke/
+/out/

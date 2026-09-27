@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Demo board</title>
+<!--
+  自带的演示页面（无依赖）：几列可拖拽卡片，用 Pointer 事件实现。
+  类名与导演页 observe() 监听的一致：
+    .drag-ghost（拖拽幽灵，will-change: transform）+ .lifted（拿起）/ .dropping（松手落位，0.2 s transform 过渡）
+    .card-placeholder（占位，在列表间移动）
+  注意：导演页用 dispatchEvent 派发的事件 isTrusted=false，这里不做 isTrusted 检查，也不用 setPointerCapture。
+-->
+<style>
+  :root { --font: system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: var(--font); background: linear-gradient(135deg, #0c66e4, #6e5dc6); display: flex; gap: 20px; padding: 48px 56px; align-items: flex-start; user-select: none; }
+  .list { width: 300px; background: #f1f2f4; border-radius: 14px; padding: 12px; box-shadow: 0 2px 6px #0003; }
+  .list h2 { margin: 4px 8px 12px; font-size: 16px; color: #172b4d; }
+  .card { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; font-size: 15px; color: #172b4d; box-shadow: 0 1px 1px #091e4240; cursor: grab; }
+  .card .tag { display: inline-block; width: 40px; height: 8px; border-radius: 4px; margin-bottom: 8px; background: var(--c, #4bce97); }
+  .card-placeholder { height: 48px; border-radius: 10px; margin-bottom: 10px; background: #091e4224; }
+  .drag-ghost { position: fixed; left: 0; top: 0; margin: 0; pointer-events: none; will-change: transform; z-index: 10; }
+  .drag-ghost.lifted { box-shadow: 0 18px 36px #091e4259; }
+  .drag-ghost.dropping { transition: transform .2s cubic-bezier(.2, .8, .2, 1); box-shadow: 0 1px 1px #091e4240; }
+</style>
+</head>
+<body>
+  <section class="list"><h2>待办</h2>
+    <div class="card"><div class="tag"></div>设计新的首页</div>
+    <div class="card"><div class="tag" style="--c:#f5cd47"></div>整理用户反馈</div>
+    <div class="card"><div class="tag" style="--c:#f87168"></div>修复登录 bug</div>
+  </section>
+  <section class="list"><h2>进行中</h2>
+    <div class="card"><div class="tag" style="--c:#9f8fef"></div>写宣传片分镜</div>
+  </section>
+  <section class="list"><h2>已完成</h2>
+    <div class="card"><div class="tag"></div>搭建项目</div>
+  </section>
+<script>
+  let drag = null; // { card, ghost, ph, dx, dy }
+  const place = (g, x, y, rot) => { g.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`; };
+
+  document.addEventListener('pointerdown', e => {
+    const card = e.target.closest('.card');
+    if (!card || drag) return;
+    const r = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.style.width = r.width + 'px';
+    const ph = document.createElement('div');
+    ph.className = 'card-placeholder';
+    ph.style.height = r.height + 'px';
+    card.replaceWith(ph);
+    document.body.appendChild(ghost);
+    drag = { card, ghost, ph, dx: e.clientX - r.left, dy: e.clientY - r.top };
+    place(ghost, r.left, r.top, 0);
+    requestAnimationFrame(() => { ghost.classList.add('lifted'); place(ghost, e.clientX - drag.dx, e.clientY - drag.dy, 3); });
+  });
+
+  document.addEventListener('pointermove', e => {
+    if (!drag || drag.ghost.classList.contains('dropping')) return;
+    place(drag.ghost, e.clientX - drag.dx, e.clientY - drag.dy, 3);
+    // 按指针横坐标找列表，按纵坐标找插入位置
+    const list = [...document.querySelectorAll('.list')].find(l => { const r = l.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right; });
+    if (!list) return;
+    const before = [...list.querySelectorAll('.card')].find(c => { const r = c.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+    if (before) { if (before.previousElementSibling !== drag.ph) list.insertBefore(drag.ph, before); }
+    else if (list.lastElementChild !== drag.ph) list.appendChild(drag.ph);
+  });
+
+  document.addEventListener('pointerup', () => {
+    if (!drag || drag.ghost.classList.contains('dropping')) return;
+    const d = drag, r = d.ph.getBoundingClientRect();
+    d.ghost.classList.remove('lifted');
+    d.ghost.classList.add('dropping');
+    place(d.ghost, r.left, r.top, 0);
+    let done = false;
+    const finish = () => { if (done) return; done = true; d.ph.replaceWith(d.card); d.ghost.remove(); drag = null; };
+    d.ghost.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, 260); // 兜底：transitionend 丢失时也能收尾
+  });
+</script>
+</body>
+</html>

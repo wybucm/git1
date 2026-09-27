@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>番茄专注 · Tomato Focus</title>
+<!--
+  单文件、零依赖的番茄钟。设计尺寸 1440×810，不出现滚动条。
+  交互：
+    1. 点击「＋ 添加任务」→ 弹出 #modal（加 .open，0.25 s 缩放过渡）
+    2. 在弹窗输入框里输入任务名，回车 → 任务出现在列表里并设为当前任务
+    3. 点击「专注模式」开关 → .switch 加 .on，旋钮 0.3 s transform 过渡；
+       过渡结束时写 body.dataset.settled = 'on' / 'off'（供宣传片导演页观察），同时开始倒计时
+-->
+<style>
+  :root {
+    --font: system-ui, "PingFang SC", sans-serif;
+    --bg: #fff5f0; --ink: #2b1d1a; --muted: #8a716a; --tomato: #ef5b3f; --leaf: #3fa66b; --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: var(--font); color: var(--ink); background: var(--bg);
+    transition: background .6s ease; user-select: none;
+  }
+  body.focus { background: #221614; color: #fbeee9; --muted: #b59890; --card: #2f201d; }
+  header { display: flex; align-items: center; justify-content: space-between; height: 88px; padding: 0 64px; }
+  .logo { display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 800; letter-spacing: .02em; }
+  .logo i { width: 38px; height: 38px; border-radius: 50%; background: var(--tomato); position: relative; box-shadow: inset -6px -6px 0 #0002; }
+  .logo i::after { content: ""; position: absolute; left: 13px; top: -6px; width: 12px; height: 12px; border-radius: 2px 10px; background: var(--leaf); transform: rotate(-20deg); }
+  .toggle { display: flex; align-items: center; gap: 16px; font-size: 18px; font-weight: 600; cursor: pointer; }
+  .switch { width: 76px; height: 40px; border-radius: 20px; background: #e6d6cf; position: relative; transition: background .3s ease; }
+  .switch .knob {
+    position: absolute; left: 4px; top: 4px; width: 32px; height: 32px; border-radius: 50%; background: #fff;
+    box-shadow: 0 2px 6px #0003; transition: transform .3s cubic-bezier(.3, 1.4, .5, 1); will-change: transform;
+  }
+  .switch.on { background: var(--tomato); }
+  .switch.on .knob { transform: translateX(36px); }
+
+  main { display: grid; grid-template-columns: 560px 1fr; gap: 56px; padding: 24px 64px 0; }
+  .dial { position: relative; width: 520px; height: 520px; margin: 0 auto; }
+  .dial svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .dial circle { fill: none; stroke-width: 22; }
+  .dial .track { stroke: #f1ddd5; transition: stroke .6s; }
+  body.focus .dial .track { stroke: #3a2824; }
+  .dial .prog { stroke: var(--tomato); stroke-linecap: round; transition: stroke-dashoffset .9s linear; }
+  .dial .readout { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .time { font-size: 128px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .now { margin-top: 6px; font-size: 22px; color: var(--muted); max-width: 380px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now b { color: inherit; }
+
+  .panel h2 { margin: 18px 0 18px; font-size: 22px; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+  .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .tasks li {
+    display: flex; align-items: center; gap: 18px; padding: 22px 26px; border-radius: 18px; background: var(--card);
+    font-size: 22px; box-shadow: 0 2px 10px #5a2a1a14; transition: background .6s, transform .3s;
+  }
+  .tasks li .dot { width: 14px; height: 14px; border-radius: 50%; background: #e6d6cf; }
+  .tasks li .n { margin-left: auto; font-size: 18px; color: var(--muted); }
+  .tasks li.current { outline: 3px solid var(--tomato); }
+  .tasks li.current .dot { background: var(--tomato); }
+  .tasks li.new { animation: slideIn .35s ease-out; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-14px); } }
+  .add {
+    margin-top: 18px; width: 100%; padding: 22px; border: 2px dashed #e0b9ab; border-radius: 18px; background: transparent;
+    color: var(--tomato); font: 700 22px var(--font); cursor: pointer;
+  }
+  .stats { display: flex; gap: 40px; margin-top: 28px; font-size: 18px; color: var(--muted); }
+  .stats b { display: block; font-size: 34px; color: var(--ink); }
+  body.focus .stats b { color: #fbeee9; }
+
+  #scrim { position: fixed; inset: 0; background: #2b1d1a66; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  #modal {
+    position: fixed; left: 50%; top: 50%; width: 620px; margin: -150px 0 0 -310px; padding: 36px 40px; border-radius: 26px;
+    background: #fff; color: var(--ink); box-shadow: 0 30px 80px #2b1d1a55;
+    z-index: 10; opacity: 0; transform: scale(.9); pointer-events: none; transition: opacity .25s, transform .25s cubic-bezier(.2, .9, .3, 1.2);
+  }
+  #modal.open { opacity: 1; transform: none; pointer-events: auto; }
+  #modal.open ~ #scrim, body.modal #scrim { opacity: 1; pointer-events: auto; }
+  #modal h3 { margin: 0 0 20px; font-size: 26px; }
+  #modal input {
+    width: 100%; padding: 18px 20px; border: 2px solid #f1ddd5; border-radius: 14px; font: 500 26px var(--font); color: var(--ink); outline: none;
+  }
+  #modal input:focus { border-color: var(--tomato); }
+  #modal .hint { margin-top: 14px; font-size: 16px; color: #8a716a; }
+  #modal .row { display: flex; gap: 12px; margin-top: 16px; }
+  #modal .pill { padding: 8px 16px; border-radius: 999px; background: #fff0ea; color: var(--tomato); font-size: 16px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"><i></i>番茄专注</div>
+    <label class="toggle" id="focusToggle">专注模式 <div class="switch" id="switch"><div class="knob"></div></div></label>
+  </header>
+  <main>
+    <section class="dial">
+      <svg viewBox="0 0 520 520"><circle class="track" cx="260" cy="260" r="236"/><circle class="prog" id="prog" cx="260" cy="260" r="236"/></svg>
+      <div class="readout">
+        <div class="time" id="time">25:00</div>
+        <div class="now" id="now">选一个任务开始专注</div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>今日任务</h2>
+      <ul class="tasks" id="tasks">
+        <li><span class="dot"></span>回复设计评审意见<span class="n">🍅 ×2</span></li>
+        <li><span class="dot"></span>整理周报数据<span class="n">🍅 ×1</span></li>
+        <li><span class="dot"></span>阅读 30 分钟<span class="n">🍅 ×1</span></li>
+      </ul>
+      <button class="add" id="add">＋ 添加任务</button>
+      <div class="stats"><div><b id="done">3</b>今日番茄</div><div><b>75</b>专注分钟</div><div><b>5</b>连续天数</div></div>
+    </section>
+  </main>
+  <div id="modal" role="dialog">
+    <h3>新任务</h3>
+    <input id="taskInput" placeholder="今天要专注什么？" autocomplete="off">
+    <div class="row"><span class="pill">🍅 ×1</span><span class="pill">今天</span><span class="pill">高优先级</span></div>
+    <div class="hint">回车添加 · Esc 取消</div>
+  </div>
+  <div id="scrim"></div>
+<script>
+  const $ = s => document.querySelector(s);
+  const TOTAL = 25 * 60;
+  const C = 2 * Math.PI * 236;
+  let left = TOTAL, timer = null;
+  const prog = $('#prog');
+  prog.style.strokeDasharray = C;
+  const render = () => {
+    $('#time').textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+    prog.style.strokeDashoffset = C * (1 - left / TOTAL);
+  };
+  render();
+
+  // 1. 弹窗
+  const modal = $('#modal'), input = $('#taskInput');
+  const openModal = () => { modal.classList.add('open'); input.value = ''; input.focus(); };
+  const closeModal = () => { modal.classList.remove('open'); input.blur(); };
+  $('#add').addEventListener('click', openModal);
+  $('#scrim').addEventListener('click', closeModal);
+
+  // 2. 输入任务：实时预览到表盘下方，回车加入列表
+  input.addEventListener('input', () => { $('#now').innerHTML = input.value ? `正在输入：<b>${input.value.replace(/</g, '&lt;')}</b>` : '选一个任务开始专注'; });
+  document.addEventListener('keydown', e => {
+    if (!modal.classList.contains('open')) return;
+    if (e.key === 'Escape') return closeModal();
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    document.querySelectorAll('.tasks li').forEach(li => li.classList.remove('current'));
+    const li = document.createElement('li');
+    li.className = 'new current';
+    li.innerHTML = `<span class="dot"></span>${input.value.trim().replace(/</g, '&lt;')}<span class="n">🍅 ×1</span>`;
+    $('#tasks').prepend(li);
+    $('#now').innerHTML = `当前任务：<b>${input.value.trim().replace(/</g, '&lt;')}</b>`;
+    closeModal();
+  });
+  $('#tasks').addEventListener('click', e => {
+    const li = e.target.closest('li'); if (!li) return;
+    document.querySelectorAll('.tasks li').forEach(x => x.classList.toggle('current', x === li));
+    $('#now').innerHTML = `当前任务：<b>${li.firstChild.nextSibling.textContent}</b>`;
+  });
+
+  // 3. 专注模式开关：旋钮 0.3 s 过渡，结束时写 body.dataset.settled，并启动 / 暂停倒计时
+  const sw = $('#switch');
+  $('#focusToggle').addEventListener('click', e => {
+    e.preventDefault();
+    const on = !sw.classList.contains('on');
+    sw.classList.toggle('on', on);
+    document.body.classList.toggle('focus', on);
+    delete document.body.dataset.settled;
+    clearInterval(timer); timer = null;
+    if (on) timer = setInterval(() => { if (left > 0) { left--; render(); } }, 1000);
+  });
+  sw.querySelector('.knob').addEventListener('transitionend', e => {
+    if (e.propertyName === 'transform') document.body.dataset.settled = sw.classList.contains('on') ? 'on' : 'off';
+  });
+</script>
+</body>
+</html>

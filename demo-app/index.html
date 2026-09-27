@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hue · 调色板生成器</title>
+<!--
+  演示用的小工具（单文件、零依赖）：输入一个种子色，生成 5 色调色板。
+  交互：
+    1. 在输入框里输入十六进制颜色 → 实时重新生成调色板（input 事件）
+    2. 点击色块 → 底部弹出详情面板（#sheet.open，0.25 s 过渡），Esc 或 × 关闭
+    3. 右上角深色开关（.switch.on，旋钮 transform 0.3 s 过渡；过渡结束时 body[data-settled] 更新）
+-->
+<style>
+  :root {
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --bg: #f6f5f2; --fg: #1d1d1f; --muted: #6e6e73; --panel: #fff; --line: #0000001a;
+  }
+  body.dark { --bg: #121216; --fg: #f4f4f6; --muted: #9a9aa2; --panel: #1d1d23; --line: #ffffff1f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font); background: var(--bg); color: var(--fg);
+    transition: background .4s ease, color .4s ease;
+    display: flex; flex-direction: column; overflow: hidden; user-select: none;
+  }
+  header { display: flex; align-items: center; gap: 14px; padding: 28px 48px; }
+  .logo { width: 34px; height: 34px; border-radius: 10px; background: conic-gradient(#ff5f6d, #ffc371, #47e891, #3fa7ff, #a26bff, #ff5f6d); }
+  header h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+  header .sub { color: var(--muted); font-size: 14px; }
+  .spacer { flex: 1; }
+  .switch {
+    position: relative; width: 64px; height: 34px; border-radius: 17px; border: 0; cursor: pointer;
+    background: #d9d9de; transition: background .3s ease;
+  }
+  .switch .knob {
+    position: absolute; left: 4px; top: 4px; width: 26px; height: 26px; border-radius: 50%; background: #fff;
+    box-shadow: 0 2px 6px #0003; transition: transform .3s cubic-bezier(.3, .7, .2, 1); will-change: transform;
+    display: grid; place-items: center; font-size: 14px;
+  }
+  .switch.on { background: #5b5bf0; }
+  .switch.on .knob { transform: translateX(30px); }
+  .modeLabel { font-size: 14px; color: var(--muted); width: 36px; }
+
+  main { flex: 1; display: flex; flex-direction: column; padding: 8px 48px 40px; gap: 26px; }
+  .seedRow { display: flex; align-items: center; gap: 16px; }
+  .seedRow label { font-size: 15px; color: var(--muted); }
+  .seedBox {
+    display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 10px 16px; box-shadow: 0 1px 2px #0000000d; transition: background .4s ease;
+  }
+  .seedBox .dot { width: 22px; height: 22px; border-radius: 7px; background: var(--seed, #3fa7ff); }
+  #seed {
+    font: 600 20px/1 "JetBrains Mono", ui-monospace, monospace; width: 150px; border: 0; outline: 0;
+    background: transparent; color: var(--fg); text-transform: lowercase;
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  #palette { flex: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; min-height: 0; }
+  .sw {
+    position: relative; border-radius: 22px; background: var(--c); cursor: pointer; overflow: hidden;
+    box-shadow: 0 10px 30px -12px #0006; transition: background .35s ease, transform .2s ease;
+  }
+  .sw:hover { transform: translateY(-4px); }
+  .sw .meta {
+    position: absolute; left: 18px; bottom: 16px; font: 600 17px/1.3 "JetBrains Mono", ui-monospace, monospace;
+    color: var(--ink); text-transform: uppercase;
+  }
+  .sw .meta small { display: block; font: 500 12px/1.4 var(--font); opacity: .75; text-transform: none; }
+
+  #sheet {
+    position: absolute; left: 50%; bottom: 36px; width: 560px; margin-left: -280px;
+    background: var(--panel); color: var(--fg); border-radius: 22px; border: 1px solid var(--line);
+    box-shadow: 0 30px 80px -20px #0008; padding: 22px 24px; display: flex; gap: 20px; align-items: center;
+    opacity: 0; transform: translateY(40px) scale(.96); pointer-events: none;
+    transition: opacity .25s ease, transform .25s cubic-bezier(.2, .8, .2, 1);
+  }
+  #sheet.open { opacity: 1; transform: none; pointer-events: auto; }
+  #sheet .big { width: 96px; height: 96px; border-radius: 18px; background: var(--c); flex: none; }
+  #sheet h3 { margin: 0 0 6px; font: 700 26px/1.1 "JetBrains Mono", ui-monospace, monospace; text-transform: uppercase; }
+  #sheet p { margin: 2px 0; font-size: 14px; color: var(--muted); }
+  #sheet .copied { display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 600; color: #fff; background: #1f9d55; border-radius: 8px; padding: 4px 10px; }
+  #sheet .close { position: absolute; right: 14px; top: 10px; border: 0; background: none; color: var(--muted); font-size: 22px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo"></div>
+    <h1>Hue</h1><span class="sub">一个种子色，五种好配色</span>
+    <div class="spacer"></div>
+    <span class="modeLabel" id="modeLabel">浅色</span>
+    <button class="switch" id="mode" aria-label="深色模式"><span class="knob">☀︎</span></button>
+  </header>
+  <main>
+    <div class="seedRow">
+      <label for="seed">种子色</label>
+      <div class="seedBox"><span class="dot"></span><input id="seed" value="#3fa7ff" maxlength="7" spellcheck="false" autocomplete="off"></div>
+      <span class="hint">输入任意 #RRGGBB，点色块查看详情</span>
+    </div>
+    <section id="palette"></section>
+  </main>
+  <div id="sheet" role="dialog">
+    <div class="big"></div>
+    <div><h3 id="sheetHex"></h3><p id="sheetRgb"></p><p id="sheetHsl"></p><span class="copied">已复制到剪贴板</span></div>
+    <button class="close" aria-label="关闭">×</button>
+  </div>
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const NAMES = ['主色', '邻近 +30°', '互补', '三分 +120°', '柔和底色'];
+
+  const hexToRgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+  const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    if (!d) return [0, 0, l * 100];
+    const s = d / (1 - Math.abs(2 * l - 1));
+    let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [(h * 60 + 360) % 360, s * 100, l * 100];
+  }
+  function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return rgbToHex(f(0) * 255, f(8) * 255, f(4) * 255);
+  }
+  const ink = hex => { const [r, g, b] = hexToRgb(hex); return (r * .299 + g * .587 + b * .114) > 150 ? '#111' : '#fff'; };
+
+  function palette(seed) {
+    const [h, s, l] = rgbToHsl(...hexToRgb(seed));
+    return [
+      seed,
+      hslToHex((h + 30) % 360, s, l),
+      hslToHex((h + 180) % 360, s * .9, l),
+      hslToHex((h + 120) % 360, s * .85, Math.min(l + 5, 80)),
+      hslToHex(h, Math.max(s * .35, 8), 88),
+    ];
+  }
+
+  const pal = $('#palette');
+  for (let i = 0; i < 5; i++) {
+    const el = document.createElement('div');
+    el.className = 'sw';
+    el.innerHTML = `<div class="meta"><small>${NAMES[i]}</small><span></span></div>`;
+    el.addEventListener('click', () => openSheet(el.dataset.hex));
+    pal.appendChild(el);
+  }
+  function render(seed) {
+    document.documentElement.style.setProperty('--seed', seed);
+    palette(seed).forEach((hex, i) => {
+      const el = pal.children[i];
+      el.dataset.hex = hex;
+      el.style.setProperty('--c', hex);
+      el.style.setProperty('--ink', ink(hex));
+      el.querySelector('.meta span').textContent = hex;
+    });
+  }
+
+  $('#seed').addEventListener('input', e => {
+    const v = e.target.value.trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(v)) render(v);
+  });
+
+  const sheet = $('#sheet');
+  function openSheet(hex) {
+    const [r, g, b] = hexToRgb(hex), [h, s, l] = rgbToHsl(r, g, b);
+    sheet.style.setProperty('--c', hex);
+    $('#sheetHex').textContent = hex;
+    $('#sheetRgb').textContent = `RGB ${r}, ${g}, ${b}`;
+    $('#sheetHsl').textContent = `HSL ${Math.round(h)}°, ${Math.round(s)}%, ${Math.round(l)}%`;
+    navigator.clipboard?.writeText(hex).catch(() => {});
+    sheet.classList.add('open');
+  }
+  const closeSheet = () => sheet.classList.remove('open');
+  sheet.querySelector('.close').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+
+  const mode = $('#mode'), knob = mode.querySelector('.knob');
+  mode.addEventListener('click', () => {
+    const on = mode.classList.toggle('on');
+    document.body.classList.toggle('dark', on);
+    knob.textContent = on ? '☾' : '☀︎';
+    $('#modeLabel').textContent = on ? '深色' : '浅色';
+  });
+  // 旋钮过渡结束时记录当前模式（导演页据此判断过渡是否跟随虚拟时间）
+  knob.addEventListener('transitionend', e => { if (e.propertyName === 'transform') document.body.dataset.settled = mode.classList.contains('on') ? 'dark' : 'light'; });
+
+  render($('#seed').value);
+})();
+</script>
+</body>
+</html>
