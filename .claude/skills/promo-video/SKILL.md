@@ -42,7 +42,7 @@ pip install -q numpy scipy imageio-ffmpeg && $V/fetch-fonts.sh
 
 下文命令都在 `$V` 的上一级目录（即默认 `ROOT`）里执行，命令里的 `video/` 就是 `$V` 相对这一级的路径（`$V=demo-app2/video` 时先 `cd demo-app2`，仍写 `video/...`）。环境验证通过后可删掉 `$V/demo.html`，免得把示例页一起提交。
 
-**量坐标**（写 SPEC 镜头 `{x,y}` 和指针路径要用）：在冒烟分支里 `at(.1, () => console.log(JSON.stringify(Object.fromEntries(['#a', '.b'].map(s => [s, rect(q(s))])))))`，用 `--no-video --to 1` 渲染，从 stderr 的 `[page]` 行读 1440×810 视口里的 CSS 像素。
+**量坐标**（写 SPEC 镜头 `{x,y}` 和指针路径要用）：在冒烟分支里 `at(.1, () => console.log(JSON.stringify(Object.fromEntries(['#a', '.b'].map(s => [s, rect(q(s))])))))`，用 `--no-video --to 1` 渲染，从 stderr 的 `[page]` 行读 1440×810 视口里的 CSS 像素（要在导演页里量：注入字体后行高会变，单独打开页面量出来的坐标会差几个像素）。
 
 `render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，只缩小输出视频> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
 
