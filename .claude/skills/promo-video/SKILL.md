@@ -13,7 +13,7 @@ description: 为网页或 Web 应用制作宣传片 / 产品演示视频 / 功�
 | --- | --- |
 | `SPEC.template.md` | 空白 SPEC，复制到仓库根目录 `SPEC.md` 后填写 |
 | `SPEC.example.md` | 完整范例：`trello/index.html` 的 58 秒看板宣传片（成片源码在仓库 `video/`） |
-| `template/cdp.mjs` | 极简 CDP 客户端（headless_shell、确定性模式、BeginFrame 控制、`scale` 低分辨率） |
+| `template/cdp.mjs` | 极简 CDP 客户端（headless_shell、确定性模式、BeginFrame 控制） |
 | `template/render.mjs` | 静态服务器 + 逐帧渲染 + 导出 cues.json |
 | `template/director.template.html` | 导演页引擎 + 2–3 段示例剧本 |
 | `template/audio.template.py` | 乐器、UI 音效、混响、母带；配乐由节拍表 `SECTIONS` 驱动 |
@@ -31,13 +31,13 @@ pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 
 在 `video/director.html` 里把 `APP` 指向被展示的页面（相对导演页、必须同源，由 render.mjs 的服务器从 `--root` 提供），再按 SPEC 分镜表逐段写剧本。
 
-`render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，低分辨率> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
+`render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，只缩小输出视频> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
 
 ## 工作流程
 
 1. **写 SPEC**（主会话）：规格、被展示页面与示例数据、分镜表（时间码 | 镜头 | 交互 | 速度坡度 | 标题 | 音乐/音效）、开场结尾文案、风险点、验收清单。分镜表是唯一事实来源，剧本和 `SECTIONS` 都从它翻译。
 2. **冒烟测试风险点**：对每个"没把握的交互"（拖拽库是否认合成事件、过渡是否跟虚拟时间、字体是否加载）写一个 2–3 秒的最小剧本，用 `--scale 0.25 --to 3` 渲染，看 cue 时间差（见下）和几张 still。不通过就先改引擎/剧本，**不要**带着疑问跑全片。
-3. **低分辨率关键帧预览**：`node video/render.mjs --no-video --scale 0.5 --stills 1,5.5,11.8,...`，再拼成一张图看构图、标题是否压主体：
+3. **低分辨率关键帧预览**：`node video/render.mjs --no-video --stills 1,5.5,11.8,...`（`--no-video` 不会覆盖 cues.json），再拼成一张图看构图、标题是否压主体：
    `"$FFMPEG" -pattern_type glob -i 'video/out/stills/*.jpg' -vf "scale=480:-1,tile=4x3" -frames:v 1 video/out/contact.jpg`
    注意：`--stills` 仍要从 0 跑到最后一个 still（状态是累积的），只是不编码视频。
 4. **全片渲染**：`./video/make.sh`（或单独 `node video/render.mjs`）。1080p 约 0.3 s/帧，58 s×30 fps ≈ 10 分钟 —— 用 `run_in_background` 启动，等完成通知，**不要**写 sleep/until 轮询。
@@ -59,7 +59,8 @@ pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 - **字体**：`fetch-fonts.sh` 用 Google Fonts CSS API 下载到 `~/.fonts`（Noto Sans SC / Inter / JetBrains Mono，均 SIL OFL），导演页往 iframe 注入字体样式；`DIRECTOR.ready` 等两个文档的 `fonts.ready`。
 - **音画同步**：音效提示点由导演页 `observe()` 观察真实 DOM 状态生成（幽灵元素出现、加上 `lifted`/`dropping` 类、占位符换位置），不要按剧本时间硬写。每条 cue 带当时的速率 `r`，audio.py 在慢镜头里把音效按 `1/r` 拉长。换了被展示页面就要改 `observe()` 的选择器。
 - **合成事件**：拖拽库若检查 `isTrusted` 就驱动不了，先冒烟测试；需要时改用 CDP `Input.dispatchMouseEvent`（但那样指针坐标要换算到 iframe）。
-- **性能参考**：1920×1080 约 0.3 s/帧；`--scale 0.25` 约快 3–5 倍。预览只截 still，不渲染视频。
+- **性能参考**：1920×1080 约 0.3 s/帧，58 s×30 fps 全片约 10 分钟。预览只截 still，不渲染视频；用时间范围（`--to 3`）而不是分辨率来缩短冒烟测试。
+- **`--scale` 不会加快渲染**：BeginFrame 截图忽略 `deviceScaleFactor < 1`（实测仍输出 1920×1080），所以 `--scale` 只是让 ffmpeg 把输出缩小（0.25 → 480×270），stills 仍是全分辨率。
 
 ## 自查清单（交付前逐项跑，结果写进汇报）
 

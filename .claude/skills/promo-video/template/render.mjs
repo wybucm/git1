@@ -7,10 +7,11 @@
 //
 //   --root    静态 HTTP 服务器的根目录（同源 iframe 需要），默认当前工作目录
 //   --page    导演页相对 root 的路径（可带 ?query），默认 video/director.html
-//   --outdir  输出目录，stills 存到 <outdir>/stills，cues 存到 <outdir>/cues.json；
+//   --outdir  输出目录，stills 存到 <outdir>/stills，cues 存到 <outdir>/cues.json（--no-video 时不写，免得覆盖全片的 cues）；
 //             默认 <root>/<page 所在目录>/out；显式传入时相对当前工作目录解析
 //   --out     视频文件路径，默认 <outdir>/video.mp4（相对当前工作目录解析）
-//   --scale   截图设备像素比，默认 1；低分辨率预览/冒烟测试用（如 0.25 → 480×270）
+//   --scale   输出视频缩放比例，默认 1；冒烟测试用（如 0.25 → 480×270）。只缩小编码后的视频，
+//             截图仍是全分辨率（BeginFrame 截图忽略 deviceScaleFactor<1），所以不会加快渲染；stills 也是全分辨率
 //   --width   导演页宽度（CSS 像素），默认 1920
 //   --height  导演页高度（CSS 像素），默认 1080
 //   --crf     libx264 CRF，默认 15
@@ -55,7 +56,7 @@ const server = http.createServer((req, res) => {
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const url = `http://127.0.0.1:${server.address().port}/${PAGE}`;
 
-const b = await launch({ port: 9300 + Math.floor(Math.random() * 500), width: WIDTH, height: HEIGHT, scale: SCALE });
+const b = await launch({ port: 9300 + Math.floor(Math.random() * 500), width: WIDTH, height: HEIGHT });
 let ticks = await b.navigate(url, 1000);
 // 等待字体与 iframe 就绪（模板导演页的 ready 在 iframe load 及两个文档字体都就绪后才 resolve）
 await b.evaluate('DIRECTOR.ready.then(() => 1)');
@@ -80,7 +81,7 @@ const advance = ms => new Promise(res => { waiter = res; b.page('Emulation.setVi
 let ff = null;
 if (!NO_VIDEO) {
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  const vf = SCALE !== 1 ? ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2'] : [];
+  const vf = SCALE !== 1 ? ['-vf', `scale=trunc(iw*${SCALE}/2)*2:trunc(ih*${SCALE}/2)*2`] : [];
   ff = spawn(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
     ...vf, '-c:v', 'libx264', '-preset', 'slow', '-crf', String(CRF), '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart', OUT],
     { stdio: ['pipe', 'inherit', 'inherit'] });
@@ -110,7 +111,7 @@ for (let i = 0; i < N; i++) {
 }
 const cues = await b.evaluate('DIRECTOR.cues');
 const lastFrameTime = (N - 1) / FPS;
-fs.writeFileSync(path.join(OUTDIR, 'cues.json'), JSON.stringify({ duration: N / FPS, fps: FPS, rendered: [FROM, lastFrameTime], cues }, null, 1));
+if (!NO_VIDEO) fs.writeFileSync(path.join(OUTDIR, 'cues.json'), JSON.stringify({ duration: N / FPS, fps: FPS, rendered: [FROM, lastFrameTime], cues }, null, 1));
 if (ff) { ff.stdin.end(); await new Promise(r => ff.on('close', r)); }
 b.close(); server.close();
 console.error(`done in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${cues.length} cues`);

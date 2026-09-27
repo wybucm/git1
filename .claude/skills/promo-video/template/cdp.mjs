@@ -75,8 +75,8 @@ export async function launch({ width = 1920, height = 1080, port = 9333, scale =
   const page = (method, params) => send(method, params, sessionId);
   await page('Page.enable');
   await page('Runtime.enable');
-  // deviceScaleFactor 只影响截图/合成的物理像素密度，布局仍按 width×height 的 CSS 像素计算，
-  // 截图分辨率变为 width*scale × height*scale。
+  // 实测：BeginFrame 截图忽略 deviceScaleFactor < 1，截图始终是 width×height。
+  // 低分辨率输出由 render.mjs 交给 ffmpeg 缩放（--scale），这里的 scale 不会让渲染变快。
   await page('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
   listeners.push(m => {
     if (m.method === 'Runtime.consoleAPICalled') console.error('[page]', m.params.args.map(a => a.value ?? a.description).join(' '));
