@@ -147,13 +147,13 @@
 (() => {
   'use strict';
   const FPS = 30;
-  const DURATION = 8; // 示例时长；正式剧本按 SPEC.md 的分镜表改这里
+  // ?smoke=1 时跑 SPEC §5 的最小冒烟剧本（3s，缩短的 RATE），否则跑全片（10s）。
+  const SMOKE = new URLSearchParams(location.search).has('smoke');
+  const DURATION = SMOKE ? 3 : 10; // SPEC.md §1：时长 ≤ 10s
   const $ = s => document.querySelector(s);
 
-  // 被展示的页面（相对导演页，需同源）；render.mjs 的 --page 可带 ?app= 覆盖。
-  // 默认是同目录下自带的 demo.html，模板可在任何仓库直接跑通；正式项目改成真实页面，例如：
-  //   const APP = new URLSearchParams(location.search).get('app') || '../trello/index.html';
-  const APP = new URLSearchParams(location.search).get('app') || 'demo.html';
+  // 被展示的页面：demo-app/index.html（同源，相对导演页 demo-app/video/）。
+  const APP = new URLSearchParams(location.search).get('app') || '../index.html';
 
   /* ================= 工具 ================= */
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
@@ -263,9 +263,11 @@
 
   /* ================= 速度坡度：被展示页面内部时间的播放速率 ================= */
   // [t, rate] 关键点，线性插值（控制 CSS 过渡、定时器等“真实时间”）；最后一个 t 必须等于 DURATION
-  const RATE = [
-    [0, 1], [2.0, 1], [2.2, .25], [3.4, .25], [3.6, 1], [4.05, 1], [4.15, .3], [4.9, .3], [5.1, 1], [DURATION, 1],
-  ];
+  // 取自 SPEC.md §3「RATE 表」；smoke 模式用 §5 冒烟测试的缩短版（把开关点击放进一段 0.3× 窗口内，
+  // 好验证 toggleStart→toggle 的 Δ×r 跟随虚拟时间，而不是瞬间完成）。
+  const RATE = SMOKE
+    ? [[0, 1], [0.9, 1], [1.0, .3], [2.4, .3], [2.5, 1], [3, 1]]
+    : [[0, 1], [4.8, 1], [4.9, .35], [5.6, .35], [5.8, 1], [7.0, 1], [7.1, .3], [7.75, .3], [7.9, 1], [DURATION, 1]];
   function rateAt(t) {
     for (let i = 0; i < RATE.length - 1; i++) {
       const [a, ra] = RATE[i], [b, rb] = RATE[i + 1];
