@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Kanban Promo — Director</title>
+<!--
+  导演页：把真实的看板（../trello/index.html）放进 iframe，
+  用脚本驱动真实的指针交互，外层用 CSS 3D 做镜头运动、景深与调色。
+  所有画面都是时间 t 的确定性函数，由 render.mjs 逐帧调用 DIRECTOR.frame(t) 并截图。
+-->
+<style>
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+  * { box-sizing: border-box; }
+  #stage {
+    position: absolute; inset: 0; overflow: hidden;
+    background: #03040a;
+    perspective: 1900px; perspective-origin: 960px 540px;
+    font-family: Inter, "Noto Sans SC", sans-serif;
+  }
+  /* ---------- 环境：暗场 + 彩色辉光 + 粒子 ---------- */
+  #env { position: absolute; inset: -10%; }
+  .glow { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; }
+  #glowA { width: 1100px; height: 900px; left: 10%; top: 5%; background: radial-gradient(circle, #1f5fff 0%, transparent 65%); }
+  #glowB { width: 1000px; height: 900px; right: 5%; bottom: 0; background: radial-gradient(circle, #8f5cff 0%, transparent 65%); }
+  #glowC { width: 700px; height: 600px; left: 40%; top: 40%; background: radial-gradient(circle, #ff7a59 0%, transparent 65%); opacity: 0; }
+  #particles { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+  #floorGrid {
+    position: absolute; left: -1000px; top: 0; width: 3920px; height: 2400px;
+    background-image:
+      linear-gradient(rgba(120,150,255,.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,150,255,.10) 1px, transparent 1px);
+    background-size: 80px 80px;
+    -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 0%, transparent 70%);
+    opacity: 0;
+  }
+
+  /* ---------- 世界：看板所在的 3D 平面 ---------- */
+  #world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-style: preserve-3d; }
+  #rig {
+    position: absolute; left: 0; top: 0; width: 1440px; height: 810px;
+    transform-origin: 0 0; transform-style: preserve-3d;
+  }
+  #boardShadow {
+    position: absolute; inset: 0; border-radius: 22px;
+    box-shadow: 0 60px 140px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.08), 0 0 160px 10px rgba(80,110,255,.25);
+  }
+  #appWrap { position: absolute; inset: 0; border-radius: 22px; overflow: hidden; background: #0c66e4; }
+  #app { position: absolute; left: 0; top: 0; width: 1440px; height: 810px; border: 0; display: block; }
+  #sheen {
+    position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+    background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.16) 45%, transparent 60%);
+    background-size: 300% 100%; background-position: 120% 0; mix-blend-mode: screen;
+  }
+  #cursor { position: absolute; left: 0; top: 0; width: 34px; height: 34px; pointer-events: none; transform-origin: 0 0; }
+  #cursor svg { position: absolute; left: 0; top: 0; filter: drop-shadow(0 3px 4px rgba(0,0,0,.45)); }
+  #cursor .hand { display: none; left: -14px; top: -12px; }
+  #cursor.grab .arrow { display: none; }
+  #cursor.grab .hand { display: block; }
+  .ripple { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.9); pointer-events: none; opacity: 0; }
+
+  /* ---------- 景深：两层 backdrop 模糊，遮罩留出清晰区 ---------- */
+  .dof { position: absolute; inset: 0; pointer-events: none; }
+
+  /* ---------- 开场：Claude Code 终端 ---------- */
+  #intro { position: absolute; inset: 0; perspective: 1900px; }
+  #introBg { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 40%, #1b1511 0%, #080706 70%); }
+  #term {
+    position: absolute; left: 190px; top: 110px; width: 1540px; height: 860px;
+    background: #141413; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 50px 120px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.09);
+    font-family: "JetBrains Mono", "Noto Sans SC", monospace; font-size: 25px; line-height: 1.55; color: #e8e6e3;
+    transform-origin: 50% 50%;
+  }
+  #termBar { height: 50px; background: #232220; display: flex; align-items: center; padding: 0 20px; gap: 10px; border-bottom: 1px solid #2e2d2a; }
+  #termBar i { width: 15px; height: 15px; border-radius: 50%; display: block; }
+  #termBar span { flex: 1; text-align: center; color: #8d8a84; font-size: 17px; font-family: Inter, sans-serif; margin-right: 70px; }
+  #termBody { padding: 30px 40px; position: relative; }
+  .box { border: 2px solid #d97757; border-radius: 10px; padding: 14px 22px; width: 880px; margin-bottom: 26px; }
+  .box b { color: #d97757; font-weight: 700; }
+  .dim { color: #8d8a84; }
+  .inbox { border: 2px solid #5b5955; border-radius: 10px; padding: 12px 20px; display: flex; gap: 14px; }
+  .inbox .gt { color: #b8b5ae; }
+  .caret { display: inline-block; width: 13px; height: 30px; background: #e8e6e3; vertical-align: -6px; margin-left: 2px; }
+  .hint { color: #6c6a65; font-size: 19px; margin: 8px 0 0 22px; }
+  .umsg { background: #262522; border-radius: 6px; padding: 6px 16px; color: #d4d1ca; display: inline-block; }
+  .think { color: #d97757; margin-top: 22px; }
+  .tline { color: #9c9891; font-style: italic; padding-left: 40px; white-space: pre; }
+  .tline em { color: #c7c3bb; font-style: italic; }
+  .dot { color: #4eba65; }
+  .adot { color: #e8e6e3; }
+  .tool b { font-weight: 700; }
+  .result { color: #8d8a84; padding-left: 26px; }
+  .result b { color: #e8e6e3; font-weight: 400; }
+
+  /* ---------- 标题 ---------- */
+  #titles { position: absolute; inset: 0; pointer-events: none; }
+  .title {
+    position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap;
+    font-family: "Noto Sans SC", sans-serif; font-weight: 900; color: #fff; opacity: 0;
+    text-shadow: 0 6px 40px rgba(0,0,0,.55);
+  }
+  .title.side { left: 120px; right: auto; text-align: left; transform-origin: 0 50%; }
+  .title.side .en { text-indent: 0; font-size: 22px; letter-spacing: .45em; margin-top: 10px; }
+  .title .en { display: block; font-family: Inter, sans-serif; font-weight: 600; font-size: 24px; letter-spacing: .6em; color: rgba(255,255,255,.72); margin-top: 18px; text-indent: .6em; }
+  .caption {
+    position: absolute; left: 96px; bottom: 150px; opacity: 0; color: #fff; white-space: nowrap;
+    font-family: "Noto Sans SC", sans-serif; font-weight: 700; font-size: 46px; letter-spacing: .04em;
+    text-shadow: 0 4px 30px rgba(0,0,0,.6);
+  }
+  .caption small { display: block; font-family: Inter, sans-serif; font-weight: 600; font-size: 17px; letter-spacing: .5em; color: rgba(255,255,255,.7); margin-bottom: 12px; }
+  .caption::before { content: ""; position: absolute; left: -26px; top: 6px; bottom: 6px; width: 5px; border-radius: 3px; background: linear-gradient(#5b8cff, #b07cff); }
+
+  .stat { position: absolute; top: 330px; width: 520px; text-align: center; color: #fff; opacity: 0; }
+  .stat b { display: block; font-family: Inter, sans-serif; font-weight: 900; font-size: 190px; line-height: 1; letter-spacing: -.03em;
+    background: linear-gradient(180deg, #fff 30%, #9fb6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stat span { display: block; font-family: "Noto Sans SC", sans-serif; font-weight: 700; font-size: 38px; margin-top: 16px; letter-spacing: .08em; }
+
+  #endcard { position: absolute; inset: 0; background: #000; opacity: 0; display: flex; align-items: center; justify-content: center; }
+  #endText { font-family: "JetBrains Mono", monospace; font-size: 64px; color: #f4f1ea; letter-spacing: .01em; opacity: 0; }
+  #endText .acc { color: #d97757; }
+  #endText .cur { display: inline-block; width: 30px; height: 70px; background: #d97757; vertical-align: -12px; margin-left: 8px; }
+
+  /* ---------- 画面处理 ---------- */
+  .bar { position: absolute; left: 0; right: 0; height: 0; background: #000; z-index: 50; }
+  #barT { top: 0; } #barB { bottom: 0; }
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 60; mix-blend-mode: screen; }
+  #leak { position: absolute; inset: 0; opacity: 0; z-index: 55; mix-blend-mode: screen;
+    background: radial-gradient(ellipse 60% 80% at 15% 30%, rgba(255,140,60,.8), transparent 60%),
+                radial-gradient(ellipse 50% 70% at 90% 80%, rgba(255,60,120,.5), transparent 60%); }
+  #vignette { position: absolute; inset: 0; z-index: 56; pointer-events: none;
+    background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%); }
+  #grain { position: absolute; inset: 0; width: 1920px; height: 1080px; z-index: 57; opacity: .07; mix-blend-mode: overlay; pointer-events: none; }
+  #fade { position: absolute; inset: 0; background: #000; z-index: 70; opacity: 1; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="mblur" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur id="mblurStd" stdDeviation="0 0"/></filter>
+</svg>
+<div id="stage">
+  <div id="env">
+    <div class="glow" id="glowA"></div><div class="glow" id="glowB"></div><div class="glow" id="glowC"></div>
+  </div>
+  <canvas id="particles" width="1920" height="1080"></canvas>
+
+  <div id="world">
+    <div id="rig">
+      <div id="floorGrid"></div>
+      <div id="boardShadow"></div>
+      <div id="appWrap"><iframe id="app" src="../trello/index.html"></iframe><div id="sheen"></div></div>
+      <div id="cursor">
+        <svg class="arrow" width="34" height="34" viewBox="0 0 34 34"><path d="M4 2 L4 27 L10.5 21 L15 31 L19.5 29 L15 19.5 L24 19.5 Z" fill="#111" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+        <svg class="hand" width="40" height="40" viewBox="0 0 40 40"><path d="M12 17 C12 14 16 14 16 17 L16 15 C16 12 20 12 20 15 L20 15 C20 12.5 24 12.5 24 15.5 L24 16.5 C24 14 28 14 28 17 L28 25 C28 31 24 34 19 34 C14 34 11 31 9.5 27 L7.5 21.5 C7 19.5 10 18.5 11 20.5 L12 22 Z" fill="#fff" stroke="#111" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="dof" id="dof1"></div>
+  <div class="dof" id="dof2"></div>
+
+  <div id="intro">
+    <div id="introBg"></div>
+    <div id="term">
+      <div id="termBar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>claude — ~/git1 — 158×42</span></div>
+      <div id="termBody">
+        <div class="box"><b>✻</b> Welcome to <b>Claude Code</b>!<br><br><span class="dim">&nbsp;&nbsp;/help for help, /status for your current setup</span><br><br><span class="dim">&nbsp;&nbsp;cwd: /home/user/git1</span></div>
+        <div id="promptArea">
+          <div class="inbox"><span class="gt">&gt;</span><span><span id="typed"></span><span class="caret" id="caret"></span></span></div>
+          <div class="hint">? for shortcuts</div>
+        </div>
+        <div id="convo" style="display:none">
+          <div><span class="umsg">&gt; <span id="umsgText"></span></span></div>
+          <div class="think" id="thinkHead"><span id="spin">✻</span> <span id="thinkWord">Thinking…</span></div>
+          <div id="tlines"></div>
+          <div id="answer" style="margin-top:20px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="titles"></div>
+
+  <div id="endcard"><div id="endText"></div></div>
+
+  <div class="bar" id="barT"></div><div class="bar" id="barB"></div>
+  <div id="leak"></div>
+  <div id="vignette"></div>
+  <canvas id="grain" width="960" height="540"></canvas>
+  <div id="flash"></div>
+  <div id="fade"></div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const FPS = 30;
+  const DURATION = 58;
+  const $ = s => document.querySelector(s);
+
+  /* ================= 工具 ================= */
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const inv = (a, b, v) => clamp((v - a) / (b - a));
+  const E = {
+    lin: k => k,
+    io: k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2,
+    out: k => 1 - Math.pow(1 - k, 3),
+    in: k => k * k * k,
+    outExpo: k => k === 1 ? 1 : 1 - Math.pow(2, -10 * k),
+    inExpo: k => k === 0 ? 0 : Math.pow(2, 10 * k - 10),
+    ioQuint: k => k < .5 ? 16 * k ** 5 : 1 - Math.pow(-2 * k + 2, 5) / 2,
+    outBack: k => { const c = 1.4; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); },
+  };
+  // 窗口 [a,b] 内的缓动进度
+  const seg = (t, a, b, ease = E.io) => ease(inv(a, b, t));
+  // 进出场包络
+  const env = (t, a, b, fi = .3, fo = .3) => Math.min(inv(a, a + fi, t), 1 - inv(b - fo, b, t));
+  // 确定性噪声（手持抖动）
+  const noise = (t, seed) => Math.sin(t * 1.7 + seed) * .5 + Math.sin(t * 2.9 + seed * 1.3) * .3 + Math.sin(t * 5.3 + seed * 2.1) * .2;
+  function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  /* ================= 声音提示（音频脚本读取） ================= */
+  const cues = [];
+  let T = 0;
+  const cue = (type, extra = {}) => cues.push({ t: +T.toFixed(4), type, r: +rateAt(T).toFixed(3), ...extra });
+
+  /* ================= iframe 中的看板 ================= */
+  const app = $('#app');
+  let W, D;
+  const ready = new Promise(res => {
+    app.addEventListener('load', () => {
+      W = app.contentWindow; D = W.document;
+      // 模拟 macOS 上的系统字体效果（SF + 苹方），不改动看板本身的任何逻辑
+      const st = D.createElement('style');
+      st.textContent = ':root{--font: Inter, "Noto Sans SC", sans-serif;} html{scrollbar-width:none}';
+      D.head.appendChild(st);
+      res();
+    });
+  });
+  const q = s => D.querySelector(s);
+  const qa = s => [...D.querySelectorAll(s)];
+  const cardByTitle = title => qa('.card').find(c => c.querySelector('.card-title')?.textContent.trim() === title);
+  const listByTitle = title => qa('.list').find(l => l.querySelector('.list-title, h2')?.textContent.includes(title));
+  const rect = el => el.getBoundingClientRect();
+  const center = el => { const r = rect(el); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+
+  // 指针与点击（真实派发 Pointer / Mouse 事件）
+  const ptr = { x: 1500, y: 900, down: false, visible: false };
+  function fire(type, x, y, buttons) {
+    const target = D.elementFromPoint(x, y) || D.body;
+    const init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons, view: W };
+    const Ctor = type.startsWith('pointer') ? W.PointerEvent : W.MouseEvent;
+    target.dispatchEvent(new Ctor(type, init));
+    return target;
+  }
+  function pointerTo(x, y) {
+    if (Math.abs(x - ptr.x) < .01 && Math.abs(y - ptr.y) < .01) return;
+    ptr.x = x; ptr.y = y;
+    fire('pointermove', x, y, ptr.down ? 1 : 0);
+  }
+  function press() { ptr.down = true; fire('pointerdown', ptr.x, ptr.y, 1); fire('mousedown', ptr.x, ptr.y, 1); ripple(); cue('click', { v: .8 }); }
+  function release(clickToo = false) {
+    ptr.down = false;
+    const tg = fire('pointerup', ptr.x, ptr.y, 0); fire('mouseup', ptr.x, ptr.y, 0);
+    if (clickToo) tg.dispatchEvent(new W.MouseEvent('click', { bubbles: true, cancelable: true, clientX: ptr.x, clientY: ptr.y, view: W }));
+  }
+  function click() { press(); release(true); }
+  function key(k) {
+    const tg = D.activeElement || D.body;
+    tg.dispatchEvent(new W.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  }
+  function typeInto(el, text) {
+    el.value = text;
+    el.dispatchEvent(new W.Event('input', { bubbles: true }));
+  }
+  const ripples = [];
+  function ripple() {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    $('#rig').appendChild(r);
+    ripples.push({ el: r, t0: T, x: ptr.x, y: ptr.y });
+  }
+
+  /* ================= 时间轴：一次性动作 + 连续轨道 ================= */
+  const actions = [];   // {t, fn}
+  const tracks = [];    // {a, b, fn(t)}
+  const at = (t, fn) => actions.push({ t, fn, done: false });
+  const during = (a, b, fn) => tracks.push({ a, b, fn });
+
+  // 指针路径：关键点 [t, x, y, ease]，x/y 可以是函数（在第一次用到时求值并缓存）
+  function pathTrack(keys) {
+    const cache = new Map();
+    const val = (k, i) => {
+      if (!cache.has(k)) cache.set(k, typeof k[1] === 'function' ? k[1]() : { x: k[1], y: k[2] });
+      return cache.get(k);
+    };
+    during(keys[0][0], keys[keys.length - 1][0], t => {
+      let i = 0;
+      while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+      const a = keys[i], b = keys[i + 1];
+      const pa = val(a), pb = val(b);
+      const k = (b[3] || E.io)(inv(a[0], b[0], t));
+      pointerTo(lerp(pa.x, pb.x, k), lerp(pa.y, pb.y, k));
+    });
+  }
+
+  /* ================= 速度坡度：看板内部时间的播放速率 ================= */
+  // [t, rate] 关键点，线性插值（控制 CSS 过渡、定时器等“真实时间”）
+  const RATE = [
+    [0, 1], [10.30, 1], [10.50, .14], [12.15, .14], [12.45, 1],
+    [13.18, 1], [13.34, .11], [15.35, .11], [15.45, .22], [16.55, .22], [16.9, 1],
+    [18.55, 1], [18.8, .38], [22.1, .38], [22.35, 1],
+    [24.55, 1], [24.7, .35], [25.6, .35], [25.8, 1],
+    [58, 1],
+  ];
+  function rateAt(t) {
+    for (let i = 0; i < RATE.length - 1; i++) {
+      const [a, ra] = RATE[i], [b, rb] = RATE[i + 1];
+      if (t >= a && t <= b) return lerp(ra, rb, inv(a, b, t));
+    }
+    return 1;
+  }
+
+  /* ================= 镜头 ================= */
+  // 相机：看板坐标 (x,y) 位于画面中心，z 为缩放，rx/ry/rz 为旋转角（度）
+  const cam = { x: 720, y: 405, z: 1.2, rx: 0, ry: 0, rz: 0, ox: 0, oy: 0 };
+  const shots = []; // {a, b, fn(t, k) => camSpec}
+  const shot = (a, b, fn) => shots.push({ a, b, fn });
+  const mix = (A, B, k) => { const o = {}; for (const key in A) o[key] = lerp(A[key], B[key] ?? A[key], k); return o; };
+  // 平滑跟随（弹簧），用于跟拍被拖动的卡片
+  const follow = { x: 0, y: 0, vx: 0, vy: 0, init: false };
+  function followStep(tx, ty, stiff = 60, damp = 14) {
+    if (!follow.init) { Object.assign(follow, { x: tx, y: ty, vx: 0, vy: 0, init: true }); return follow; }
+    const dt = 1 / FPS;
+    for (let i = 0; i < 4; i++) {
+      const h = dt / 4;
+      follow.vx += (stiff * (tx - follow.x) - damp * follow.vx) * h;
+      follow.vy += (stiff * (ty - follow.y) - damp * follow.vy) * h;
+      follow.x += follow.vx * h; follow.y += follow.vy * h;
+    }
+    return follow;
+  }
+
+  // 景深参数、动态模糊、画面效果由各段镜头写入
+  const fx = { dof: 0, dofR: 420, dofRy: 300, dofX: 960, dofY: 540, mblur: 0, mblurY: 0, bars: 0, flash: 0, leak: 0, shake: 0, glowC: 0, grid: 0, sheen: -1 };
+
+  /* ================= 标题 ================= */
+  const titles = [];
+  function title(a, b, html, o = {}) {
+    const el = document.createElement('div');
+    el.className = o.cls || 'title';
+    el.innerHTML = html;
+    Object.assign(el.style, o.style || {});
+    $('#titles').appendChild(el);
+    titles.push({ a, b, el, o });
+  }
+  function drawTitles(t) {
+    for (const { a, b, el, o } of titles) {
+      if (t < a - .01 || t > b + .01) { el.style.opacity = 0; continue; }
+      const kIn = E.outExpo(inv(a, a + (o.fi ?? .45), t));
+      const kOut = inv(b - (o.fo ?? .35), b, t);
+      const life = inv(a, b, t);
+      const op = kIn * (1 - E.in(kOut));
+      el.style.opacity = op;
+      const blur = (1 - kIn) * 18 + E.in(kOut) * 14;
+      el.style.filter = `blur(${blur.toFixed(2)}px)`;
+      if (o.kind === 'caption') {
+        el.style.transform = `translateX(${((1 - kIn) * -40 + kOut * 20).toFixed(2)}px)`;
+      } else if (o.kind === 'stat') {
+        el.style.transform = `translateY(${((1 - kIn) * 60).toFixed(1)}px) scale(${(1 + (1 - kIn) * .25 + life * .04).toFixed(4)})`;
+      } else {
+        const s = (o.s0 ?? 1.18) - ((o.s0 ?? 1.18) - 1) * kIn + life * (o.drift ?? .06);
+        el.style.transform = `scale(${s.toFixed(4)})`;
+        el.style.letterSpacing = `${(o.ls0 ?? .5) - ((o.ls0 ?? .5) - (o.ls1 ?? .12)) * E.out(inv(a, b, t))}em`;
+      }
+    }
+  }
+
+  /* =========================================================================
+     剧本
+     ========================================================================= */
+
+  /* ---------- 0–5s：Claude Code 开场 ---------- */
+  const PROMPT = '写一个精美的trello看板，不允许使用第三方库';
+  const THOUGHTS = [
+    '单文件 HTML，CSS / JS 全部内联，<em>零依赖</em>',
+    '数据模型：lists → cards（标签 · 截止日期 · 清单 · 封面）',
+    'Pointer Events 自研拖拽：<em>幽灵元素 + 占位符 + FLIP 让位</em>',
+    'localStorage 持久化与撤销，浅色 / 深色主题，响应式',
+  ];
+  const TYPE_A = .38, TYPE_STEP = .05;
+  const TYPE_B = TYPE_A + PROMPT.length * TYPE_STEP;  // ≈1.48
+  const ENTER = TYPE_B + .14;
+  const TH0 = ENTER + .2, TH_STEP = .42;
+  const WRITE_T = TH0 + THOUGHTS.length * TH_STEP + .12;
+  const SPIN = ['✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳'];
+  let lastTyped = 0;
+  const tlineEls = THOUGHTS.map(() => { const d = document.createElement('div'); d.className = 'tline'; $('#tlines').appendChild(d); return d; });
+  // 按可见字符逐步显示带标签的 HTML
+  function partialHTML(html, n) {
+    let out = '', count = 0, i = 0;
+    while (i < html.length && count < n) {
+      if (html[i] === '<') { const j = html.indexOf('>', i); out += html.slice(i, j + 1); i = j + 1; continue; }
+      out += html[i++]; count++;
+    }
+    if (out.includes('<em>') && !out.endsWith('</em>') && out.lastIndexOf('<em>') > out.lastIndexOf('</em>')) out += '</em>';
+    return out;
+  }
+  const plainLen = h => h.replace(/<[^>]+>/g, '').length;
+  const thoughtShown = THOUGHTS.map(() => 0);
+
+  function drawIntro(t) {
+    const intro = $('#intro');
+    const vis = t < 5.02;
+    intro.style.display = vis ? '' : 'none';
+    if (!vis) return;
+    // 打字
+    const n = Math.floor(clamp((t - TYPE_A) / TYPE_STEP, 0, PROMPT.length));
+    if (n > lastTyped) { for (let i = lastTyped; i < n; i++) cue('key', { v: .5 + (i * 37 % 10) / 20 }); lastTyped = n; }
+    $('#typed').textContent = PROMPT.slice(0, n);
+    $('#caret').style.opacity = (t < TYPE_A || t > TYPE_B) ? (Math.floor(t * 2.4) % 2 ? 0 : 1) : 1;
+    const submitted = t >= ENTER;
+    if (submitted && !drawIntro.entered) { drawIntro.entered = true; cue('enter'); }
+    $('#promptArea').style.display = submitted ? 'none' : '';
+    $('#convo').style.display = submitted ? '' : 'none';
+    $('#umsgText').textContent = PROMPT;
+    $('#thinkHead').style.opacity = t >= TH0 - .08 ? 1 : 0;
+    $('#spin').textContent = SPIN[Math.floor(t * 12) % SPIN.length];
+    $('#thinkWord').textContent = t < WRITE_T ? 'Thinking…' : 'Thought for 12s';
+    THOUGHTS.forEach((h, i) => {
+      const a = TH0 + i * TH_STEP;
+      const len = plainLen(h);
+      const c = Math.floor(clamp((t - a) / (TH_STEP * .72), 0, 1) * len);
+      if (c > 0 && thoughtShown[i] === 0) cue('tick', { v: .5 });
+      thoughtShown[i] = c;
+      tlineEls[i].innerHTML = c ? partialHTML(h, c) + (c < len ? '<span style="color:#d97757">▍</span>' : '') : '';
+    });
+    const ans = [];
+    if (t >= WRITE_T) ans.push('<div><span class="adot">●</span> 好的，我来写一个零依赖、单文件的看板应用。</div>');
+    if (t >= WRITE_T + .3) ans.push('<div class="tool" style="margin-top:14px"><span class="dot">●</span> <b>Write</b>(trello/index.html)</div>');
+    if (t >= WRITE_T + .55) ans.push('<div class="result">⎿&nbsp; Wrote <b>2718</b> lines to <b>trello/index.html</b></div>');
+    const html = ans.join('');
+    if (html !== drawIntro.last) {
+      if (ans.length > (drawIntro.n || 0)) cue(ans.length === 2 ? 'tool' : 'tick', { v: .7 });
+      drawIntro.n = ans.length; drawIntro.last = html; $('#answer').innerHTML = html;
+    }
+    // 镜头：缓慢推近，结尾加速冲进 Write 那一行
+    const push = seg(t, 0, 4.3, E.io);
+    const rush = seg(t, 4.25, 5.0, E.inExpo);
+    const s = 0.9 + push * .12 + rush * 5.5;
+    const ry = lerp(9, -2, push) + rush * -6, rx = lerp(6, 1, push);
+    const ty = lerp(40, -30, push) + rush * -160;
+    const tx = rush * 260;
+    $('#term').style.transform = `translate3d(${tx}px, ${ty}px, 0) rotateX(${rx}deg) rotateY(${ry}deg) scale(${s})`;
+    $('#term').style.filter = rush > .02 ? `blur(${(rush * 10).toFixed(2)}px)` : 'none';
+    intro.style.opacity = 1 - seg(t, 4.85, 5.0, E.lin);
+  }
+  at(4.1, () => cue('riser', { dur: .9 }));
+
+  /* ---------- 5–9.6s：看板登场 + 标题 ---------- */
+  at(5.0, () => cue('impact', { v: 1 }));
+  title(5.05, 6.55, '一个文件', { style: { top: '380px', fontSize: '176px' }, ls0: .6, ls1: .18 });
+  title(6.55, 8.2, '零依赖<span class="en">ZERO DEPENDENCIES · PURE HTML/CSS/JS</span>', { style: { top: '360px', fontSize: '176px' }, ls0: .6, ls1: .2, fi: .35 });
+  at(6.55, () => cue('hit', { v: .9 }));
+  at(8.0, () => cue('section', { name: 'drums' }));
+  shot(5.0, 8.2, (t) => {
+    const k = seg(t, 5.0, 8.2, E.outExpo);
+    return mix({ x: 720, y: 430, z: .42, rx: 64, ry: 0, rz: -24 }, { x: 720, y: 400, z: 1.12, rx: 20, ry: -16, rz: -4 }, k);
+  });
+  shot(8.2, 9.55, (t) => {
+    const k = seg(t, 8.2, 9.55, E.io);
+    return mix({ x: 720, y: 400, z: 1.12, rx: 20, ry: -16, rz: -4 }, { x: 452, y: 205, z: 1.95, rx: 16, ry: -10, rz: -2 }, k);
+  });
+  during(5.0, 9.6, t => {
+    fx.dof = lerp(16, 3, seg(t, 5.0, 7.5, E.out)) + seg(t, 8.4, 9.5) * 6;
+    fx.dofR = lerp(200, 700, seg(t, 5.0, 7.5)); fx.dofRy = fx.dofR * .6;
+    fx.flash = Math.max(0, 1 - (t - 5.0) / .35) * .9;
+    fx.leak = env(t, 5.0, 6.8, .1, 1.2) * .7;
+    fx.grid = env(t, 5.0, 9.6, .8, 1.5) * .8;
+    fx.sheen = inv(5.6, 7.4, t);
+  });
+
+  /* ---------- 9.6–18.3s：卡片拖拽（主菜） ---------- */
+  let drag1 = {};
+  pathTrack([
+    [9.2, 1300, 700],
+    [10.25, () => { const c = cardByTitle('实现卡片拖拽排序'); const r = rect(c); drag1.g = { x: r.left + r.width * .42, y: r.top + r.height * .52 }; return drag1.g; }, 0, E.out],
+    [10.36, () => drag1.g],
+    [12.2, () => ({ x: drag1.g.x + 30, y: drag1.g.y - 10 })],
+    [13.18, () => ({ x: 566, y: drag1.g.y - 16 }), 0, E.io],
+    [14.9, () => { const r = rect(listByTitle('审核中')); drag1.end = { x: r.left + 150, y: drag1.g.y - 18 }; return drag1.end; }, 0, E.io],
+    [15.4, () => ({ x: drag1.end.x + 4, y: drag1.end.y + 2 })],
+  ]);
+  at(9.25, () => { ptr.visible = true; });
+  at(10.36, () => press());
+  at(15.4, () => release());
+  title(10.9, 12.5, '拿起<span class="en">01 · LIFT</span>', { cls: 'title side', style: { top: '640px', fontSize: '150px' }, ls0: .5, ls1: .22, fi: .5, fo: .4, s0: 1.08 });
+  title(13.9, 15.4, '让位<span class="en">02 · MAKE WAY</span>', { cls: 'title side', style: { top: '640px', fontSize: '150px' }, ls0: .5, ls1: .22, fi: .5, fo: .4, s0: 1.08 });
+  title(16.4, 18.0, '落定<span class="en">03 · SETTLE</span>', { cls: 'title side', style: { top: '640px', fontSize: '150px' }, ls0: .5, ls1: .22, fi: .35, fo: .4, s0: 1.08 });
+  at(10.5, () => cue('slowdown'));
+  at(12.15, () => cue('whoosh', { dur: 1.0, v: 1 }));
+  at(13.3, () => cue('slowdown'));
+  at(16.9, () => cue('speedup'));
+
+  // 近景：拿起（慢镜头，绕卡片环绕）
+  shot(9.55, 10.36, (t) => {
+    const k = seg(t, 9.55, 10.36, E.io);
+    return mix({ x: 452, y: 205, z: 1.95, rx: 16, ry: -10, rz: -2 }, { x: 440, y: 160, z: 2.3, rx: 20, ry: -14, rz: -3 }, k);
+  });
+  shot(10.36, 12.2, (t) => {
+    const k = seg(t, 10.36, 12.2, E.io);
+    const f = followStep(ptr.x, ptr.y, 40, 12);
+    return { x: lerp(440, f.x, k), y: lerp(160, f.y + 6, k), z: lerp(2.3, 2.95, E.out(k)), rx: lerp(20, 26, k), ry: lerp(-14, 16, k), rz: lerp(-3, 3, k) };
+  });
+  // 甩镜跟拍
+  shot(12.2, 13.3, (t) => {
+    const k = seg(t, 12.2, 13.3, E.ioQuint);
+    const f = followStep(ptr.x, ptr.y, 90, 18);
+    return { x: f.x + k * 60, y: f.y + 10 * k, z: lerp(2.95, 2.25, Math.sin(k * Math.PI) * .6 + k * .4), rx: lerp(26, 18, k), ry: lerp(16, 28, k), rz: lerp(3, -2, k) };
+  });
+  // 侧角度：其余卡片让位
+  shot(13.3, 15.45, (t) => {
+    const k = seg(t, 13.3, 15.45, E.io);
+    return mix({ x: 630, y: 205, z: 2.25, rx: 18, ry: 28, rz: -2 }, { x: 700, y: 225, z: 2.05, rx: 22, ry: 14, rz: -1 }, k);
+  });
+  // 俯拍：落定
+  shot(15.45, 18.3, (t) => {
+    const k = seg(t, 15.45, 17.2, E.io);
+    const s = seg(t, 17.2, 18.3, E.io);
+    const c = mix({ x: 700, y: 215, z: 2.05, rx: 22, ry: 14, rz: -1 }, { x: 716, y: 190, z: 2.35, rx: 6, ry: 0, rz: 0 }, k);
+    return mix(c, { x: 716, y: 240, z: 1.6, rx: 14, ry: -6, rz: 0 }, s);
+  });
+  during(9.6, 18.3, t => {
+    fx.dof = lerp(4, 9, seg(t, 9.6, 10.5)) * (1 - seg(t, 17.3, 18.3) * .6);
+    fx.dofR = t < 12.2 ? 430 : t < 13.3 ? 600 : 520; fx.dofRy = fx.dofR * .62;
+    fx.bars = seg(t, 9.8, 10.6) * (1 - seg(t, 17.6, 18.3));
+    const whip = env(t, 12.25, 13.3, .35, .4);
+    fx.mblur = whip * 14;
+  });
+
+  /* ---------- 18.3–23s：列表拖拽 ---------- */
+  let drag2 = {};
+  pathTrack([
+    [18.3, () => ({ x: ptr.x, y: ptr.y })],
+    [18.75, () => { const l = listByTitle('已完成'); const r = rect(l.querySelector('.list-header') || l); drag2.g = { x: r.left + 150, y: r.top + r.height / 2 }; return drag2.g; }, 0, E.io],
+    [18.85, () => drag2.g],
+    [21.7, () => ({ x: 318, y: drag2.g.y + 14 }), 0, E.io],
+    [21.95, () => ({ x: 316, y: drag2.g.y + 14 })],
+  ]);
+  at(18.85, () => press());
+  at(21.95, () => release());
+  at(18.9, () => cue('whoosh', { dur: 2.6, v: .6 }));
+  shot(18.3, 23.0, (t) => {
+    const k = seg(t, 18.3, 23.0, E.io);
+    const f = followStep(ptr.x, ptr.y, 20, 9);
+    return { x: lerp(760, 560, k) * .7 + f.x * .3, y: 330, z: lerp(1.02, 1.12, k), rx: lerp(42, 34, k), ry: lerp(-10, 8, k), rz: lerp(-4, 2, k) };
+  });
+  during(18.3, 23.0, t => {
+    fx.dof = 7; fx.dofR = 900; fx.dofRy = 260; // 移轴感
+    fx.mblur = Math.max(0, 1 - (t - 18.3) / .25) * 10;
+  });
+  title(19.6, 21.7, '整列也能拖<span class="en">CARDS · LISTS · TOUCH LONG-PRESS</span>', { style: { top: '760px', fontSize: '84px' }, ls0: .4, ls1: .12 });
+
+  /* ---------- 23–26.5s：卡片详情 · 检查清单 ---------- */
+  at(23.0, () => { cue('cut'); cue('section', { name: 'montage' }); });
+  pathTrack([
+    [23.0, () => ({ x: ptr.x, y: ptr.y })],
+    [23.45, () => { const c = cardByTitle('实现卡片拖拽排序'); const r = rect(c.querySelector('.card-title')); return { x: r.left + 60, y: r.top + 10 }; }, 0, E.out],
+    [23.9, () => ({ x: ptr.x, y: ptr.y })],
+    [24.45, () => center(q('.overlay .check-item:not(.done) .check-toggle')), 0, E.io],
+    [25.9, () => ({ x: ptr.x + 1, y: ptr.y })],
+    [26.5, () => ({ x: ptr.x + 120, y: ptr.y + 160 })],
+  ]);
+  at(23.5, () => { click(); cue('pop'); });
+  at(24.55, () => { click(); cue('check'); });
+  at(26.1, () => { key('Escape'); cue('swish', { v: .5 }); });
+  let prog = null;
+  shot(23.0, 23.55, (t) => {
+    const k = seg(t, 23.0, 23.55, E.out);
+    return mix({ x: 560, y: 150, z: 2.4, rx: 10, ry: -18, rz: -3 }, { x: 700, y: 170, z: 2.1, rx: 8, ry: -8, rz: -1 }, k);
+  });
+  shot(23.55, 26.4, (t) => {
+    if (!prog) { const p = q('.progress-bar') || q('.overlay'); prog = p ? center(p) : { x: 540, y: 420 }; }
+    const k = seg(t, 23.55, 24.4, E.io);
+    const s = seg(t, 24.4, 26.4, E.io);
+    const c = mix({ x: 700, y: 330, z: 1.35, rx: 6, ry: -6, rz: 0 }, { x: prog.x + 80, y: prog.y + 70, z: 2.25, rx: 10, ry: 14, rz: 1 }, k);
+    return mix(c, { x: prog.x + 60, y: prog.y + 60, z: 2.5, rx: 8, ry: 22, rz: 2 }, s);
+  });
+  during(23.0, 26.4, t => { fx.dof = 6; fx.dofR = 620; fx.dofRy = 380; fx.mblur = Math.max(0, 1 - (t - 23.0) / .2) * 12; });
+  title(23.7, 26.3, '<small>CHECKLIST</small>带进度条的检查清单', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 26.5–29.5s：标签展开 ---------- */
+  at(26.5, () => cue('cut'));
+  let lab = null;
+  pathTrack([
+    [26.5, () => ({ x: ptr.x, y: ptr.y })],
+    [27.25, () => { const c = cardByTitle('支持深色模式'); const r = rect(c.querySelector('.card-label')); lab = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; return lab; }, 0, E.io],
+    [28.4, () => lab],
+    [29.5, () => ({ x: lab.x + 90, y: lab.y + 140 })],
+  ]);
+  at(27.4, () => { click(); cue('pop'); });
+  shot(26.5, 29.5, (t) => {
+    const l = cardByTitle('支持深色模式'); const c = center(l);
+    const k = seg(t, 26.5, 29.5, E.io);
+    return { x: c.x - 40 + k * 40, y: c.y - 30 - k * 60, z: lerp(3.1, 2.3, k), rx: lerp(28, 16, k), ry: lerp(-24, -8, k), rz: lerp(-4, -1, k) };
+  });
+  during(26.5, 29.5, t => { fx.dof = 8; fx.dofR = 520; fx.dofRy = 300; fx.mblur = Math.max(0, 1 - (t - 26.5) / .2) * 12; });
+  title(27.2, 29.4, '<small>LABELS</small>点一下，标签展开文字', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 29.5–32.5s：搜索 ---------- */
+  at(29.5, () => cue('cut'));
+  let sbox = null;
+  pathTrack([
+    [29.5, () => ({ x: ptr.x, y: ptr.y })],
+    [30.0, () => { sbox = center(q('.search input') || q('input[type=search]')); return { x: sbox.x + 260, y: sbox.y + 90 }; }, 0, E.out],
+    [32.5, () => ({ x: sbox.x + 270, y: sbox.y + 96 })],
+  ]);
+  at(29.75, () => { D.body.focus(); key('/'); cue('key', { v: 1 }); });
+  at(30.35, () => { typeInto(q('.search input') || q('input[type=search]'), '设'); cue('key', { v: .8 }); });
+  at(30.55, () => { typeInto(q('.search input') || q('input[type=search]'), '设计'); cue('key', { v: .9 }); cue('pop'); });
+  shot(29.5, 32.5, (t) => {
+    if (!sbox) sbox = center(q('.search input') || q('input[type=search]'));
+    const k = seg(t, 29.5, 30.8, E.io);
+    const s = seg(t, 30.8, 32.4, E.io);
+    const c = mix({ x: sbox.x - 40, y: sbox.y + 30, z: 2.7, rx: 14, ry: 18, rz: 1 }, { x: sbox.x - 120, y: sbox.y + 60, z: 2.3, rx: 10, ry: 8, rz: 0 }, k);
+    return mix(c, { x: 760, y: 300, z: 1.2, rx: 16, ry: -6, rz: -1 }, s);
+  });
+  during(29.5, 32.5, t => { fx.dof = 5; fx.dofR = 700; fx.dofRy = 420; fx.mblur = Math.max(0, 1 - (t - 29.5) / .2) * 12; });
+  title(30.4, 32.4, '<small>SEARCH · FILTER</small>按 / 搜索，实时筛选', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 32.5–36.5s：背景渐变 ---------- */
+  at(32.5, () => { cue('cut'); const i = q('.search input') || q('input[type=search]'); typeInto(i, ''); i.blur(); });
+  let bgBtn = null;
+  pathTrack([
+    [32.5, () => ({ x: ptr.x, y: ptr.y })],
+    [32.85, () => { const b = q('[data-action="open-bg"]'); bgBtn = center(b); return bgBtn; }, 0, E.out],
+    [33.0, () => bgBtn],
+  ]);
+  at(32.9, () => click());
+  const SW = [1, 7, 4, 2, 5, 6, 3, 0];
+  SW.forEach((si, i) => {
+    const tt = 33.5 + i * .5;
+    pathTrack([
+      [tt - .32, () => ({ x: ptr.x, y: ptr.y })],
+      [tt - .04, () => center(qa('.bg-swatch')[si]), 0, E.io],
+      [tt, () => center(qa('.bg-swatch')[si])],
+    ]);
+    at(tt, () => { click(); cue('swatch', { i }); });
+  });
+  shot(32.5, 37.0, (t) => {
+    const k = seg(t, 32.5, 37.0, E.io);
+    const ang = lerp(-26, 26, k);
+    return { x: lerp(980, 880, k), y: lerp(300, 330, k), z: lerp(1.35, 1.05, k), rx: lerp(30, 22, k), ry: ang, rz: lerp(-6, 5, k) };
+  });
+  during(32.5, 37.0, t => { fx.dof = 4; fx.dofR = 900; fx.dofRy = 500; fx.mblur = Math.max(0, 1 - (t - 32.5) / .2) * 12; });
+  title(33.3, 36.9, '<small>16 BACKGROUNDS</small>16 种背景，一键换装', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 37–40s：深色模式 ---------- */
+  at(37.0, () => { cue('cut'); key('Escape'); });
+  let menuBtn = null, darkBtn = null;
+  pathTrack([
+    [37.0, () => ({ x: ptr.x, y: ptr.y })],
+    [37.45, () => { menuBtn = center(q('[data-action="open-menu"]')); return menuBtn; }, 0, E.io],
+    [37.55, () => menuBtn],
+    [38.2, () => { darkBtn = center(qa('[data-pop="theme"]').find(b => b.dataset.v === 'dark')); return darkBtn; }, 0, E.io],
+    [38.3, () => darkBtn],
+    [39.8, () => ({ x: darkBtn.x - 300, y: darkBtn.y + 360 })],
+  ]);
+  at(37.5, () => click());
+  at(38.3, () => { click(); cue('hit', { v: .6 }); });
+  at(38.9, () => key('Escape'));
+  shot(37.0, 40.0, (t) => {
+    const k = seg(t, 37.0, 38.2, E.io);
+    const s = seg(t, 38.3, 40.0, E.io);
+    const c = mix({ x: 1300, y: 120, z: 2.6, rx: 10, ry: -20, rz: -2 }, { x: 1250, y: 170, z: 2.2, rx: 12, ry: -12, rz: -1 }, k);
+    return mix(c, { x: 820, y: 330, z: 1.2, rx: 20, ry: 10, rz: 2 }, s);
+  });
+  during(37.0, 40.0, t => { fx.dof = 5; fx.dofR = 700; fx.dofRy = 420; fx.mblur = Math.max(0, 1 - (t - 37.0) / .2) * 12; });
+  title(38.4, 39.9, '<small>DARK MODE</small>浅色 / 深色主题', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 40–45s：深色下的实时拖拽（1× 速度，展示跟手） ---------- */
+  at(40.0, () => { cue('cut'); cue('section', { name: 'climax' }); });
+  let d3 = {};
+  pathTrack([
+    [40.0, () => ({ x: ptr.x, y: ptr.y })],
+    [40.5, () => { const c = cardByTitle('修复移动端滚动卡顿'); const r = rect(c); d3.g = { x: r.left + r.width * .45, y: r.top + r.height * .5 }; return d3.g; }, 0, E.io],
+    [40.6, () => d3.g],
+    [41.3, () => { const l = listByTitle('待办'); const r = rect(l); return { x: r.left + 130, y: r.top + 150 }; }, 0, E.io],
+    [41.9, () => { const l = listByTitle('待办'); const r = rect(l); return { x: r.left + 140, y: r.top + 330 }; }, 0, E.io],
+    [42.25, () => ({ x: ptr.x, y: ptr.y })],
+    [42.6, () => { const c = cardByTitle('用户反馈收集表单'); const r = rect(c); d3.g2 = { x: r.left + r.width * .45, y: r.top + r.height * .5 }; return d3.g2; }, 0, E.io],
+    [42.7, () => d3.g2],
+    [43.6, () => { const l = listByTitle('已完成'); const r = rect(l); return { x: r.left + 140, y: r.top + 70 }; }, 0, E.io],
+    [43.9, () => ({ x: ptr.x, y: ptr.y })],
+    [45.0, () => ({ x: ptr.x + 200, y: ptr.y + 300 })],
+  ]);
+  at(40.6, () => press());
+  at(40.7, () => cue('whoosh', { dur: .6, v: .8 }));
+  at(42.2, () => release());
+  at(42.7, () => press());
+  at(42.8, () => cue('whoosh', { dur: .7, v: .8 }));
+  at(43.9, () => release());
+  shot(40.0, 45.0, (t) => {
+    const k = seg(t, 40.0, 45.0, E.io);
+    const f = followStep(ptr.x, ptr.y, 14, 8);
+    return { x: lerp(720, f.x, .45), y: lerp(300, f.y, .35), z: lerp(1.25, 1.45, Math.sin(k * Math.PI)), rx: lerp(30, 18, k), ry: lerp(24, -22, k), rz: lerp(3, -3, k) };
+  });
+  during(40.0, 45.0, t => { fx.dof = 6; fx.dofR = 760; fx.dofRy = 380; fx.mblur = Math.max(0, 1 - (t - 40.0) / .2) * 12; fx.glowC = env(t, 40, 45, 1, 1) * .5; });
+  title(40.4, 43.9, '<small>REAL-TIME · 1× SPEED</small>跟手，丝滑，零卡顿', { cls: 'caption', kind: 'caption' });
+
+  /* ---------- 45–51s：拉远 + 数据 ---------- */
+  at(44.9, () => cue('riser', { dur: 1.1 }));
+  at(46.0, () => cue('impact', { v: .8 }));
+  at(47.3, () => cue('hit', { v: .9 }));
+  at(48.6, () => cue('hit', { v: 1 }));
+  shot(45.0, 55.0, (t) => {
+    const k = seg(t, 45.0, 46.1, E.inExpo);
+    const s = seg(t, 46.0, 55.0, E.out);
+    const c = mix({ x: 720, y: 360, z: 1.45, rx: 18, ry: -22, rz: -3 }, { x: 720, y: 420, z: .95, rx: 30, ry: -8, rz: -2 }, k);
+    return mix(c, { x: 720, y: 520, z: .62, rx: 48, ry: 12, rz: 6 }, s);
+  });
+  during(45.0, 55.0, t => {
+    fx.dof = lerp(4, 14, seg(t, 45.8, 47.0));
+    fx.dofR = 160; fx.dofRy = 120;
+    fx.flash = Math.max(0, 1 - Math.abs(t - 46.0) / .2) * .7;
+    fx.grid = seg(t, 46, 48) * .9;
+    fx.glowC = .4;
+    fx.mblur = env(t, 45.5, 46.3, .5, .3) * 16;
+  });
+  const stat = (a, left, big, small) => title(a, 50.9, `<b>${big}</b><span>${small}</span>`, { cls: 'stat', kind: 'stat', style: { left: left + 'px' }, fi: .5, fo: .5 });
+  stat(46.0, 180, '1', '个 HTML 文件');
+  stat(47.3, 700, '0', '个第三方库');
+  stat(48.6, 1220, '2718', '行手写代码');
+
+  /* ---------- 51–55s：收尾标语 ---------- */
+  at(51.0, () => cue('impact', { v: .9 }));
+  title(51.0, 54.7, '拖拽，本该如此丝滑。<span class="en">A KANBAN BOARD, HAND-CRAFTED</span>', { style: { top: '430px', fontSize: '120px' }, ls0: .35, ls1: .08, fi: .6, fo: .6, drift: .04 });
+  during(51.0, 55.0, t => { fx.flash = Math.max(0, 1 - (t - 51.0) / .3) * .6; fx.leak = env(t, 51, 54.8, .2, 1.5) * .45; });
+
+  /* ---------- 55–58s：结尾字幕 ---------- */
+  at(54.95, () => cue('end'));
+  const END_TXT = 'build by Opus5.5(medium)';
+  function drawEnd(t) {
+    const k = seg(t, 54.7, 55.0, E.lin);
+    $('#endcard').style.opacity = k;
+    const e = $('#endText');
+    e.style.opacity = seg(t, 54.85, 55.0, E.lin);
+    const blink = Math.floor((t - 55) * 2) % 2 === 0;
+    e.innerHTML = `build by <span class="acc">Opus5.5</span>(medium)<span class="cur" style="opacity:${blink ? 1 : 0}"></span>`;
+    e.style.transform = `scale(${1 + seg(t, 54.85, 58, E.lin) * .04})`;
+    e.style.letterSpacing = `${.01 + seg(t, 54.85, 58, E.out) * .03}em`;
+  }
+
+  /* ================= 渲染 ================= */
+  const pctx = $('#particles').getContext('2d');
+  const R = mulberry(7);
+  const parts = Array.from({ length: 70 }, () => ({ x: R() * 2400 - 240, y: R() * 1400 - 160, z: .2 + R() * 1.4, r: 2 + R() * 10, h: R() < .5 ? 220 : 280, a: .15 + R() * .4, s: R() * 6 }));
+  const gctx = $('#grain').getContext('2d');
+  const grains = Array.from({ length: 6 }, (_, n) => {
+    const img = gctx.createImageData(960, 540); const r = mulberry(100 + n);
+    for (let i = 0; i < img.data.length; i += 4) { const v = r() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+    return img;
+  });
+
+  function drawParticles(t) {
+    pctx.clearRect(0, 0, 1920, 1080);
+    const px = (cam.x - 720) * .6 + cam.ry * 12, py = (cam.y - 405) * .6 - cam.rx * 6;
+    for (const p of parts) {
+      const x = ((p.x - px * p.z + Math.sin(t * .3 + p.s) * 30) % 2400 + 2400) % 2400 - 240;
+      const y = ((p.y - py * p.z - t * 12 * p.z) % 1400 + 1400) % 1400 - 160;
+      const r = p.r * (0.6 + p.z);
+      const g = pctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `hsla(${p.h},90%,70%,${p.a})`); g.addColorStop(1, `hsla(${p.h},90%,60%,0)`);
+      pctx.fillStyle = g; pctx.beginPath(); pctx.arc(x, y, r, 0, Math.PI * 2); pctx.fill();
+    }
+  }
+
+  function applyCamera(t) {
+    const sh = shots.find(s => t >= s.a && t < s.b) || shots[shots.length - 1];
+    const c = sh.fn(t);
+    Object.assign(cam, c);
+    // 手持微抖
+    const hx = noise(t, 1) * 3.5, hy = noise(t, 2) * 2.5, hr = noise(t, 3) * .25;
+    const shake = fx.shake;
+    const sx = hx + (shake ? Math.sin(t * 90) * shake * 10 : 0), sy = hy + (shake ? Math.cos(t * 77) * shake * 8 : 0);
+    $('#rig').style.transform =
+      `translate3d(${960 + sx}px, ${540 + sy}px, 0) rotateX(${cam.rx}deg) rotateY(${cam.ry}deg) rotateZ(${cam.rz + hr}deg) scale(${cam.z}) translate(${-cam.x}px, ${-cam.y}px)`;
+  }
+
+  function applyFx(t) {
+    const std = fx.mblur;
+    $('#mblurStd').setAttribute('stdDeviation', `${std.toFixed(2)} ${(std * .15).toFixed(2)}`);
+    $('#world').style.filter = std > .3 ? 'url(#mblur)' : 'none';
+    // 景深
+    const d1 = $('#dof1'), d2 = $('#dof2');
+    if (fx.dof > .3) {
+      const g = (r, ry) => `radial-gradient(ellipse ${r}px ${ry}px at ${fx.dofX}px ${fx.dofY}px, transparent 0%, transparent 55%, #000 100%)`;
+      d1.style.backdropFilter = `blur(${(fx.dof * .45).toFixed(2)}px)`;
+      d1.style.webkitMaskImage = g(fx.dofR, fx.dofRy);
+      d2.style.backdropFilter = `blur(${fx.dof.toFixed(2)}px)`;
+      d2.style.webkitMaskImage = g(fx.dofR * 1.7, fx.dofRy * 1.7);
+      d1.style.display = d2.style.display = '';
+    } else d1.style.display = d2.style.display = 'none';
+    const bh = fx.bars * 118;
+    $('#barT').style.height = $('#barB').style.height = bh + 'px';
+    $('#flash').style.opacity = fx.flash;
+    $('#leak').style.opacity = fx.leak;
+    $('#glowC').style.opacity = fx.glowC;
+    $('#floorGrid').style.opacity = fx.grid;
+    $('#floorGrid').style.transform = `translateZ(-60px)`;
+    $('#sheen').style.backgroundPosition = fx.sheen < 0 ? '120% 0' : `${lerp(120, -20, E.io(fx.sheen))}% 0`;
+    gctx.putImageData(grains[Math.floor(t * FPS) % grains.length], 0, 0);
+    // 淡入
+    $('#fade').style.opacity = 1 - seg(t, 0, .35, E.out);
+  }
+
+  function drawCursor(t) {
+    const c = $('#cursor');
+    c.style.display = ptr.visible && t < 45.2 ? '' : 'none';
+    c.classList.toggle('grab', ptr.down && !!q('.drag-ghost'));
+    c.style.transform = `translate(${ptr.x}px, ${ptr.y}px) scale(${ptr.down ? .92 : 1})`;
+    for (const r of ripples) {
+      const k = (T - r.t0) / .45;
+      if (k > 1) { r.el.style.opacity = 0; continue; }
+      r.el.style.left = r.x + 'px'; r.el.style.top = r.y + 'px';
+      r.el.style.opacity = (1 - k) * .9;
+      r.el.style.transform = `scale(${1 + E.out(k) * 3.2})`;
+    }
+  }
+
+  // 观察看板内部的真实状态，自动生成音效提示（保证音画同步）
+  const watch = { ghost: false, lifted: false, dropping: false, phParent: null, phIndex: -1, theme: '', expanded: false, modal: false, bg: '' };
+  function observe() {
+    const g = q('.drag-ghost');
+    if (g && !watch.ghost) cue('grab');
+    if (g && g.classList.contains('lifted') && !watch.lifted) cue('lift');
+    if (g && g.classList.contains('dropping') && !watch.dropping) cue('dropStart');
+    if (!g && watch.dropping) { cue('drop'); fx.shake = .35; }
+    watch.ghost = !!g; watch.lifted = !!(g && g.classList.contains('lifted')); watch.dropping = !!(g && g.classList.contains('dropping'));
+    const ph = q('.card-placeholder, .list-placeholder');
+    if (ph) {
+      const idx = [...ph.parentElement.children].indexOf(ph);
+      if (watch.phParent && (watch.phParent !== ph.parentElement || watch.phIndex !== idx)) cue('flip');
+      watch.phParent = ph.parentElement; watch.phIndex = idx;
+    } else { watch.phParent = null; watch.phIndex = -1; }
+  }
+
+  function frame(t) {
+    T = t;
+    fx.dof = 0; fx.mblur = 0; fx.bars = 0; fx.flash = 0; fx.leak = 0; fx.glowC = 0; fx.grid = 0; fx.sheen = -1;
+    fx.shake = Math.max(0, fx.shake - 1 / FPS * 1.6);
+    for (const a of actions) if (!a.done && t >= a.t) { a.done = true; a.fn(); }
+    for (const tr of tracks) if (t >= tr.a && t <= tr.b + 1 / FPS) tr.fn(Math.min(t, tr.b));
+    observe();
+    applyCamera(t);
+    drawIntro(t);
+    drawParticles(t);
+    drawTitles(t);
+    drawCursor(t);
+    drawEnd(t);
+    applyFx(t);
+    $('#world').style.visibility = t < 4.9 ? 'hidden' : 'visible';
+    return { rate: rateAt(t), now: performance.now() };
+  }
+
+  window.DIRECTOR = { FPS, DURATION, ready, frame, cues, rateAt };
+})();
+</script>
+</body>
+</html>
