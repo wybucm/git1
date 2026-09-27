@@ -347,6 +347,9 @@
      下面按 SPEC.md §3 分镜表翻译成剧本；?smoke=1 时改用 §5 的最小冒烟剧本。
      ========================================================================= */
 
+  // 结尾卡（drawEnd 与 DIRECTOR.END_FROM 在剧本块外使用，必须声明在块外）
+  const END = { from: SMOKE ? 2.8 : 8.4, text: '<span class="acc">Hue</span> · one seed, five colors' };
+
   if (SMOKE) {
 
   /* ---------- 0–3s（smoke）：种子色打字 → 点第 3 块色块 → Esc → 点开关 ---------- */
@@ -369,7 +372,6 @@
   at(1.4, () => key('Escape'));         // 关闭面板（swish）
   at(1.7, () => click());               // 点开关 → 深色（toggleStart/toggle），落在 RATE 的 .3× 窗口内
 
-  const END = { from: 2.8, text: '<span class="acc">Hue</span> · one seed, five colors' };
 
   } else {
 
@@ -446,7 +448,6 @@
   /* ---------- 8.3–10s：黑底结尾卡 ---------- */
   at(8.3, () => { ptr.visible = false; });
 
-  const END = { from: 8.4, text: '<span class="acc">Hue</span> · one seed, five colors' };
 
   }
 
