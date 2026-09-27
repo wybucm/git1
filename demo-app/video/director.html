@@ -344,52 +344,113 @@
        fx.xxx                         —— 在 during() 里写景深/动态模糊/黑边/闪光等参数
        cue(type, extra)               —— 记一个音效提示点，供 audio.py 生成配乐
 
-     下面是针对自带 demo.html（.list / .card）的一个 8 秒示例，仅作为写法参考，
-     正式项目应删除或替换成自己的分镜。
+     下面按 SPEC.md §3 分镜表翻译成剧本；?smoke=1 时改用 §5 的最小冒烟剧本。
      ========================================================================= */
 
-  /* ---------- 0–1.2s：远景建立镜头 ---------- */
-  at(0, () => { ptr.visible = true; });
-  shot(0, 1.2, (t) => {
-    const k = seg(t, 0, 1.2, E.outExpo);
-    return mix({ x: 720, y: 405, z: .7, rx: 46, ry: 10, rz: -10 }, { x: 720, y: 405, z: 1.15, rx: 18, ry: -6, rz: -2 }, k);
-  });
-  title(.1, 1.5, '看板<span class="en">DEMO</span>', { cls: 'title side', style: { top: '640px', fontSize: '110px' }, ls0: .5, ls1: .2, fi: .4, fo: .35 });
-  during(0, 1.2, t => { fx.grid = env(t, 0, 1.2, .3, .6) * .7; fx.dof = 6; fx.dofR = 700; fx.dofRy = 420; });
+  if (SMOKE) {
 
-  /* ---------- 1.8–4.2s：拖一张卡片到第二个列表 ---------- */
-  const firstCard = () => qa('.list')[0]?.querySelector('.card');
-  const secondList = () => qa('.list')[1];
-  let drag1 = {};
+  /* ---------- 0–3s（smoke）：种子色打字 → 点第 3 块色块 → Esc → 点开关 ---------- */
+  at(0, () => { ptr.visible = true; ptr.x = 1300; ptr.y = 650; });
+  shot(0, DURATION, () => ({ x: 720, y: 405, z: 1, rx: 0, ry: 0, rz: 0 })); // 静态机位，见 SPEC §5
+
+  const seedFull = '#ff5f6d';
+  for (let i = 0; i < seedFull.length; i++) {
+    const t = 0.2 + i * 0.1, prefix = seedFull.slice(0, i + 1);
+    at(t, () => { typeInto(q('#seed'), prefix); cue('key'); });
+  }
+
   pathTrack([
-    [1.2, 900, 600],
-    [1.75, () => { const c = firstCard(); const r = rect(c); drag1.g = { x: r.left + r.width * .5, y: r.top + r.height * .5 }; return drag1.g; }, 0, E.out],
-    [1.8, () => drag1.g],
-    [2.6, () => ({ x: drag1.g.x + 20, y: drag1.g.y - 10 })],
-    [3.6, () => { const r = rect(secondList()); drag1.end = { x: r.left + r.width * .5, y: drag1.g.y }; return drag1.end; }, 0, E.io],
-    [4.2, () => drag1.end],
+    [0.3, 1300, 650],
+    [0.9, () => center(qa('.sw')[2]), 0, E.io],
+    [1.0, () => center(qa('.sw')[2])],
+    [1.65, () => center(q('#mode')), 0, E.io],
   ]);
-  at(1.8, () => press());
-  at(4.2, () => release());   // 松手落在 0.3× 慢镜头里：落位过渡应持续约 0.2 s 页面时间 ≈ 0.67 s 画面时间
-  title(1.6, 2.8, '拿起<span class="en">DRAG</span>', { cls: 'title side', style: { top: '760px', fontSize: '90px' }, ls0: .5, ls1: .2, fi: .4, fo: .3, s0: 1.08 });
-  shot(1.2, 1.8, (t) => {
-    const k = seg(t, 1.2, 1.8, E.io);
-    return mix({ x: 720, y: 405, z: 1.15, rx: 18, ry: -6, rz: -2 }, { x: 460, y: 300, z: 2.1, rx: 16, ry: -12, rz: -2 }, k);
-  });
-  shot(1.8, 4.2, (t) => {
-    const f = followStep(ptr.x, ptr.y, 40, 12);
-    return { x: f.x, y: f.y, z: 1.8, rx: 16, ry: -8, rz: -2 };
-  });
-  during(1.8, 4.2, t => { fx.dof = 6; fx.dofR = 520; fx.dofRy = 320; });
+  at(1.0, () => click());               // 点第 3 块色块 → 面板弹出（pop）
+  at(1.4, () => key('Escape'));         // 关闭面板（swish）
+  at(1.7, () => click());               // 点开关 → 深色（toggleStart/toggle），落在 RATE 的 .3× 窗口内
 
-  /* ---------- 4.2–8s：拉远收尾 + 结尾字幕 ---------- */
-  shot(4.2, DURATION, (t) => {
-    const k = seg(t, 4.2, 5.2, E.io);
-    return mix({ x: 720, y: 405, z: 1.8, rx: 16, ry: -8, rz: -2 }, { x: 720, y: 405, z: 1.1, rx: 20, ry: 0, rz: 0 }, k);
+  const END = { from: 2.8, text: '<span class="acc">Hue</span> · one seed, five colors' };
+
+  } else {
+
+  /* ---------- 0–1.6s：建立镜头 ---------- */
+  at(0, () => { ptr.visible = true; ptr.x = 1300; ptr.y = 650; }); // 指针出现在右下
+  shot(0, 1.6, (t) => {
+    const k = seg(t, 0, 1.6, E.outExpo);
+    return mix({ x: 720, y: 405, z: .72, rx: 40, ry: 12, rz: -8 }, { x: 720, y: 405, z: 1.0, rx: 14, ry: -6, rz: -2 }, k);
   });
+  title(.15, 1.55, 'Hue<span class="en">ONE SEED · FIVE COLORS</span>', { cls: 'title side', style: { top: '640px', fontSize: '120px' }, ls0: .5, ls1: .2, fi: .4, fo: .35 });
+  during(0, 1.6, t => { fx.grid = env(t, 0, 1.6, .3, .6) * .7; }); // 地面网格淡入淡出
+
+  /* ---------- 1.6–4.2s：推近输入框，逐字打种子色 ---------- */
+  pathTrack([
+    [1.6, 1300, 650],
+    [2.05, () => center(q('#seed')), 0, E.io],
+  ]);
+  at(2.1, () => click());
+  const seedFull = '#ff5f6d'; // 7 个字符，2.3–2.9s 每 0.1 s 一个（见 SPEC §3）
+  for (let i = 0; i < seedFull.length; i++) {
+    const t = 2.3 + i * 0.1, prefix = seedFull.slice(0, i + 1);
+    at(t, () => { typeInto(q('#seed'), prefix); cue('key'); });
+  }
+  shot(1.6, 3.5, (t) => {
+    const k = seg(t, 1.6, 2.2, E.io);
+    return mix({ x: 720, y: 405, z: 1.0, rx: 14, ry: -6, rz: -2 }, { x: 420, y: 240, z: 1.9, rx: 10, ry: -10, rz: -1 }, k);
+  });
+  shot(3.5, 4.2, (t) => {
+    const k = seg(t, 3.5, 4.2, E.io);
+    return mix({ x: 420, y: 240, z: 1.9, rx: 10, ry: -10, rz: -1 }, { x: 620, y: 380, z: 1.25, rx: 12, ry: -4, rz: 0 }, k);
+  });
+  title(2.4, 3.9, '<small>LIVE PALETTE</small>输入种子色，实时生成', { kind: 'caption', cls: 'caption' });
+
+  /* ---------- 4.2–6.4s：跟拍第 3 块色块，点开详情面板 ---------- */
+  pathTrack([
+    [4.2, () => center(q('#seed')), 0],
+    [4.8, () => center(qa('.sw')[2]), 0, E.io],
+  ]);
+  at(4.85, () => click());       // 面板弹出（observe → pop）
+  at(6.1, () => key('Escape'));  // 关闭（observe → swish）
+  at(4.8, () => cue('slowdown'));
+  at(5.7, () => cue('speedup'));
+  shot(4.2, 4.9, (t) => {
+    const k = seg(t, 4.2, 4.8, E.io);
+    return mix({ x: 620, y: 380, z: 1.25, rx: 12, ry: -4, rz: 0 }, { x: 760, y: 520, z: 1.55, rx: 12, ry: -8, rz: 0 }, k);
+  });
+  shot(4.9, 6.4, (t) => {
+    const k = seg(t, 4.9, 5.8, E.io);
+    return mix({ x: 760, y: 520, z: 1.55, rx: 12, ry: -8, rz: 0 }, { x: 720, y: 620, z: 1.8, rx: 8, ry: 0, rz: 0 }, k);
+  });
+  title(4.95, 6.1, '点一下<span class="en">TAP FOR DETAILS</span>', { cls: 'title side', style: { top: '180px', fontSize: '96px' } });
+
+  /* ---------- 6.4–8.3s：甩到深色开关 ---------- */
+  pathTrack([
+    [6.4, () => center(qa('.sw')[2]), 0],
+    [7.05, () => center(q('#mode')), 0, E.io],
+  ]);
+  at(7.1, () => click());        // → 深色（observe → toggleStart/toggle）
+  at(7.0, () => cue('slowdown'));
+  at(7.8, () => cue('speedup'));
+  shot(6.4, 6.9, (t) => {
+    const k = seg(t, 6.4, 6.9, E.io);
+    return mix({ x: 720, y: 620, z: 1.8, rx: 8, ry: 0, rz: 0 }, { x: 1250, y: 120, z: 2.3, rx: 10, ry: -12, rz: 0 }, k);
+  });
+  during(6.4, 6.9, t => { fx.mblur = Math.sin(inv(6.4, 6.9, t) * Math.PI) * 10; }); // mblur 峰值 10
+  shot(6.9, 7.9, () => ({ x: 1250, y: 120, z: 2.3, rx: 10, ry: -12, rz: 0 }));
+  shot(7.9, DURATION, (t) => {
+    const k = seg(t, 7.9, 8.3, E.io);
+    return mix({ x: 1250, y: 120, z: 2.3, rx: 10, ry: -12, rz: 0 }, { x: 720, y: 405, z: 1.05, rx: 16, ry: 0, rz: 0 }, k);
+  });
+  during(7.9, 8.3, t => { fx.glowC = inv(7.9, 8.3, t); }); // glowC 渐入
+  title(7.2, 8.2, '深色模式<span class="en">DARK MODE</span>', { cls: 'title side', style: { top: '640px', fontSize: '96px' } });
+
+  /* ---------- 8.3–10s：黑底结尾卡 ---------- */
+  at(8.3, () => { ptr.visible = false; });
+
+  const END = { from: 8.4, text: '<span class="acc">Hue</span> · one seed, five colors' };
+
+  }
 
   /* ================= 结尾字幕（通用，from 到 DURATION 淡入并保持） ================= */
-  const END = { from: DURATION - 2, text: 'build by <span class="acc">Model</span>' };
   const CURSOR_UNTIL = DURATION;
   function drawEnd(t) {
     const a = END.from, b = a + .3;
@@ -482,21 +543,30 @@
   }
 
   // 观察被展示页面内部的真实状态，自动生成音效提示（保证音画同步）
-  // 按被展示页面的类名改这里：下面这套规则匹配自带 demo.html 与 ../trello/index.html 的拖拽实现（写法见 SKILL.md“给新页面写 observe()”）
-  const watch = { ghost: false, lifted: false, dropping: false, phParent: null, phIndex: -1 };
+  // 按 demo-app/index.html 的类名/状态改这里（对应 SPEC.md §2 的 cue 表，写法见 SKILL.md“给新页面写 observe()”）：
+  //   #sheet 加 .open → pop；去 .open → swish；#mode 加 .on → toggleStart；
+  //   body[data-settled] 变为 dark（旋钮 transitionend）→ toggle；调色板第 1 块 data-hex 变化 → swatch
+  const watch = { sheetOpen: false, modeOn: false, settledDark: false, hex0: null };
   function observe() {
-    const g = q('.drag-ghost');
-    if (g && !watch.ghost) cue('grab');
-    if (g && g.classList.contains('lifted') && !watch.lifted) cue('lift');
-    if (g && g.classList.contains('dropping') && !watch.dropping) cue('dropStart');
-    if (!g && watch.dropping) { cue('drop'); fx.shake = .35; }
-    watch.ghost = !!g; watch.lifted = !!(g && g.classList.contains('lifted')); watch.dropping = !!(g && g.classList.contains('dropping'));
-    const ph = q('.card-placeholder, .list-placeholder');
-    if (ph) {
-      const idx = [...ph.parentElement.children].indexOf(ph);
-      if (watch.phParent && (watch.phParent !== ph.parentElement || watch.phIndex !== idx)) cue('flip');
-      watch.phParent = ph.parentElement; watch.phIndex = idx;
-    } else { watch.phParent = null; watch.phIndex = -1; }
+    const sheet = q('#sheet');
+    const open = !!sheet && sheet.classList.contains('open');
+    if (open && !watch.sheetOpen) cue('pop');
+    if (!open && watch.sheetOpen) cue('swish');
+    watch.sheetOpen = open;
+
+    const mode = q('#mode');
+    const on = !!mode && mode.classList.contains('on');
+    if (on && !watch.modeOn) cue('toggleStart');
+    watch.modeOn = on;
+
+    const settledDark = D.body.dataset.settled === 'dark';
+    if (settledDark && !watch.settledDark) cue('toggle');
+    watch.settledDark = settledDark;
+
+    const sw0 = qa('.sw')[0];
+    const hex = sw0 && sw0.dataset.hex;
+    if (hex && watch.hex0 !== null && hex !== watch.hex0) cue('swatch');
+    if (hex) watch.hex0 = hex;
   }
 
   function frame(t) {

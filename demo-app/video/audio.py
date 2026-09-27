@@ -347,14 +347,14 @@ def beats(a, b, step=BEAT, offset=0.0):
         t += step
 
 
-# 节拍表：从 SPEC.md 的“音乐段落”一栏抄过来。每段 (起点秒, 终点秒, 段落类型, 参数)
+# 节拍表：从 SPEC.md §3「音乐段落」一栏抄过来。每段 (起点秒, 终点秒, 段落类型, 参数)
 SECTIONS = [
-    (0.0, 2.0, 'ambient', {'chord': 'Am'}),
-    (2.0, 4.5, 'build',   {'chord': 'F'}),
-    (4.5, 6.0, 'drop',    {'chord': 'C'}),
-    (6.0, DUR, 'outro',   {'chord': 'Am'}),
+    (0.0, 1.6, 'ambient', {'chord': 'Am'}),
+    (1.6, 4.2, 'build',   {'chord': 'F'}),
+    (4.2, 8.3, 'drop',    {'chord': 'C'}),
+    (8.3, DUR, 'outro',   {'chord': 'Am'}),
 ]
-HITS = []  # 单次强调：如 [(4.5, 'boom')]，可选 boom/braam/riser/tapestop/whoosh
+HITS = [(1.5, 'whoosh'), (8.4, 'boom')]  # SPEC §3 HITS：1.5 whoosh、8.4 boom
 
 
 def sec_ambient(b0, b1, p):
@@ -561,6 +561,9 @@ SFX = {
                         place(sfx, bell(note_hz(93), 0.45, 1.0), c['t'] + 0.11, send=0.5)),
     'swatch': lambda c: place(sfx, bell(note_hz([69, 72, 76, 79, 81, 84, 88, 91][c.get('i', 0) % 8]), 0.9, 1.4),
                               c['t'], pan=-0.5 + 0.14 * (c.get('i', 0) % 8), send=0.6),
+    # 深色开关：按下瞬间的 tick + 旋钮落定的 pop（慢镜头里用 slow(r) 重采样拉长，跟随虚拟时间）
+    'toggleStart': lambda c: place(sfx, ui_tick(0.9), c['t'], pan=0.15, send=0.2),
+    'toggle': lambda c: (lambda x: place(sfx, signal.resample(x, int(round(len(x) * slow(c.get('r', 1))))), c['t'], send=0.35))(ui_pop(0.9)),
     'hit': lambda c: (place(sfx, boom(0.7 * c.get('v', 1), 2.0, 80, 35), c['t'], send=0.3),
                       place(sfx, tom(0.6 * c.get('v', 1), 100, 60, 1.2), c['t'], send=0.5)),
     'riser': lambda c: place(sfx, riser(c.get('dur', 1.0), 0.8), c['t'], send=0.3),
