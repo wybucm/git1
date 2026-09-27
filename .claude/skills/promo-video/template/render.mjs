@@ -111,7 +111,7 @@ for (let i = 0; i < N; i++) {
 }
 const cues = await b.evaluate('DIRECTOR.cues');
 const lastFrameTime = (N - 1) / FPS;
-if (!NO_VIDEO) fs.writeFileSync(path.join(OUTDIR, 'cues.json'), JSON.stringify({ duration: N / FPS, fps: FPS, rendered: [FROM, lastFrameTime], cues }, null, 1));
+if (!NO_VIDEO) fs.writeFileSync(path.join(OUTDIR, 'cues.json'), JSON.stringify({ duration: N / FPS, fps: FPS, endFrom: await b.evaluate('DIRECTOR.END_FROM ?? null'), rendered: [FROM, lastFrameTime], cues }, null, 1));
 if (ff) { ff.stdin.end(); await new Promise(r => ff.on('close', r)); }
 b.close(); server.close();
 console.error(`done in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${cues.length} cues`);

@@ -63,22 +63,6 @@ def stream_duration(path, mapspec):
     return int(h) * 3600 + int(mi) * 60 + float(s)
 
 
-def detect_segments(path, vf, start_key, end_key):
-    out = run(["-i", path, "-vf", vf, "-f", "null", "-"])
-    segs = []
-    cur = {}
-    for line in out.splitlines():
-        m = re.search(start_key + r":\s*([\d.]+)", line)
-        if m:
-            cur = {"start": float(m.group(1))}
-        m = re.search(end_key + r":\s*([\d.]+)", line)
-        if m and "start" in cur:
-            cur["end"] = float(m.group(1))
-            segs.append(cur)
-            cur = {}
-    return segs
-
-
 def load_cues(cues_path):
     """cues.json 通常是 {"duration","fps","rendered":[from,to],"cues":[...]}，
     但也兼容裸数组格式，返回 (cues_list, meta_fps_or_None)。"""
@@ -136,12 +120,23 @@ def main():
     ap.add_argument("--expect-transition", type=float, default=None)
     ap.add_argument("--tol", type=float, default=0.05)
     ap.add_argument("--fps", type=float, default=None)
+    ap.add_argument("--allow-black-from", type=float, default=None,
+                    help="从该秒起的黑场视为有意（结尾卡），默认取 cues.json 的 endFrom")
     args = ap.parse_args()
 
     fps_from_cues = None
     if os.path.isfile(args.cues):
         try:
             _, fps_from_cues = load_cues(args.cues)
+        except Exception:
+            pass
+    # 结尾卡起点（导演页 END.from，由 render.mjs 写入 cues.json 的 endFrom）：深色结尾卡允许被判为黑场
+    end_from = args.allow_black_from
+    if end_from is None and os.path.isfile(args.cues):
+        try:
+            with open(args.cues, encoding="utf-8") as f:
+                d = json.load(f)
+            end_from = d.get("endFrom") if isinstance(d, dict) else None
         except Exception:
             pass
     fps = args.fps if args.fps is not None else (fps_from_cues if fps_from_cues else 30.0)
@@ -192,34 +187,33 @@ def main():
         # 4 & 5. 黑场 / 静止帧检测（一次 ffmpeg 完成）
         vf = "blackdetect=d=0.1:pix_th=0.10,freezedetect=n=0.001:d=1.0"
         out = run(["-i", args.final, "-vf", vf, "-f", "null", "-"])
-        black_segs = []
-        cur = {}
+        black_segs, freeze_segs = [], []
+        cur_b, cur_f = {}, {}
         for line in out.splitlines():
-            if "black_start" in line:
-                m = re.search(r"black_start:\s*([\d.]+)", line)
-                cur = {"start": float(m.group(1))} if m else {}
+            m = re.search(r"black_start:\s*([\d.]+)", line)
+            if m:
+                cur_b = {"start": float(m.group(1))}
             m = re.search(r"black_end:\s*([\d.]+)", line)
-            if m and "start" in cur:
-                cur["end"] = float(m.group(1))
-                black_segs.append(cur)
-                cur = {}
-        freeze_segs = []
-        cur = {}
-        for line in out.splitlines():
+            if m and "start" in cur_b:
+                cur_b["end"] = float(m.group(1))
+                black_segs.append(cur_b)
+                cur_b = {}
             m = re.search(r"freeze_start:\s*([\d.]+)", line)
             if m:
-                cur = {"start": float(m.group(1))}
+                cur_f = {"start": float(m.group(1))}
             m = re.search(r"freeze_duration:\s*([\d.]+)", line)
-            if m and "start" in cur:
-                cur["dur"] = float(m.group(1))
+            if m and "start" in cur_f:
+                cur_f["dur"] = float(m.group(1))
             m = re.search(r"freeze_end:\s*([\d.]+)", line)
-            if m and "start" in cur:
-                cur["end"] = float(m.group(1))
-                freeze_segs.append(cur)
-                cur = {}
+            if m and "start" in cur_f:
+                cur_f["end"] = float(m.group(1))
+                freeze_segs.append(cur_f)
+                cur_f = {}
 
-        bad_black = [s for s in black_segs if s.get("start", 0) > 0.5]
-        add("黑场检测", f"{len(black_segs)} 段: " + str(black_segs) if black_segs else "0 段",
+        bad_black = [s for s in black_segs if s.get("start", 0) > 0.5
+                     and not (end_from is not None and s.get("start", 0) >= end_from - 0.05)]
+        add("黑场检测", (f"{len(black_segs)} 段: " + str(black_segs) if black_segs else "0 段")
+            + (f"（结尾卡 ≥{end_from}s 允许）" if end_from is not None and black_segs else ""),
             "FAIL" if bad_black else "PASS")
 
         long_freeze = [s for s in freeze_segs if s.get("dur", 0) > 3.0]

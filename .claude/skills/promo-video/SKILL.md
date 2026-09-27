@@ -75,7 +75,7 @@ python3 video/check.py video/out/promo.mp4 video/out/cues.json --max-duration 60
 输出一张 PASS/FAIL 表，任一 FAIL 则退出码非 0：
 
 - **时长**（≤ `--max-duration`）、**分辨率**、**fps = 30**、**h264 + aac**、**音视频时长差 < 0.1 s**。
-- **blackdetect**：开场淡入（前 0.5 s）以外不应有黑场；**freezedetect**：列出定格段，超过 3 s 判 FAIL（结尾字幕等有意定格注意时长）。
+- **blackdetect**：开场淡入（前 0.5 s）和结尾卡（导演页 `END.from` 起，render.mjs 写进 cues.json 的 `endFrom`；也可 `--allow-black-from`）以外不应有黑场；**freezedetect**：列出定格段，超过 3 s 判 FAIL（结尾字幕等有意定格注意时长）。
 - **拖拽 cue 时间差**（证明合成器动画没被跳过）：每对 `dropStart → drop` 的 Δ 与页面时间 `Δ × r`。Δ ≤ 1.5 帧 = 落位动画瞬间结束（ORIGIN 没对齐）→ FAIL；给了 `--expect-transition`（页面自身落位过渡时长，看板/demo 是 0.2 s）时还要求 `Δ × r` 在容差内。
 - **文件大小**：分享版（`<NAME>-share.mp4`）必须 < 30 MB。
 
