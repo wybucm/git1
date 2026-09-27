@@ -4,10 +4,10 @@
 # 可配置环境变量：
 #   NAME   输出文件名前缀，默认 promo
 #   PAGE   导演页文件名（相对本目录），默认 director.html
-#   ROOT   被 HTTP 服务器暴露的根目录（导演页里的 iframe 需要同源），默认 .. （仓库根目录）
+#   ROOT   被 HTTP 服务器暴露的根目录，相对本目录解析（导演页里的 iframe 需要同源），默认 ..（本目录的上一级，须包含被展示页面）
 #   SCALE  输出视频缩放比例，默认 1（冒烟测试用 0.25；截图本身仍是全分辨率）
 #   MAX_DURATION       check.py 的时长上限（秒），默认不限
-#   EXPECT_TRANSITION  check.py 期望的落位过渡页面时长（秒），默认 0.2（demo.html / 看板）；设为空则只查 Δ>1.5 帧
+#   EXPECT_TRANSITION  check.py 期望的过渡页面时长（秒，适用于所有 <x>Start→<x> cue 对），默认 0.2（demo.html / 看板落位）；设为空则只查 Δ>1.5 帧
 set -euo pipefail
 cd "$(dirname "$0")"
 NAME="${NAME:-promo}"

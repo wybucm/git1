@@ -11,34 +11,44 @@ description: 为网页或 Web 应用制作宣传片 / 产品演示视频 / 功�
 
 | 路径 | 作用 |
 | --- | --- |
-| `SPEC.template.md` | 空白 SPEC，复制到仓库根目录 `SPEC.md` 后填写 |
+| `SPEC.template.md` | 空白 SPEC，复制为 `SPEC.md`（位置见下）后填写 |
 | `SPEC.example.md` | 完整范例：`trello/index.html` 的 58 秒看板宣传片（成片源码在仓库 `video/`） |
 | `template/cdp.mjs` | 极简 CDP 客户端（headless_shell、确定性模式、BeginFrame 控制） |
 | `template/render.mjs` | 静态服务器 + 逐帧渲染 + 导出 cues.json |
-| `template/director.template.html` | 导演页引擎 + 8 秒示例剧本（默认展示 `demo.html`） |
+| `template/director.template.html` | 导演页引擎 + 8 秒示例剧本（默认展示 `demo.html`；`?smoke` 开关、`typeAt` 逐字输入） |
 | `template/demo.html` | 自带演示页（Pointer 事件拖拽卡片，类名与 `observe()` 一致），模板在任何仓库都能直接跑通 |
-| `template/check.py` | 自动自查：时长/分辨率/fps/编码/音视频差/黑场/定格/拖拽 cue 时间差/文件大小，一张 PASS/FAIL 表 |
+| `template/check.py` | 自动自查：时长/分辨率/fps/编码/音视频差/黑场/定格/过渡 cue 对（`<x>Start→<x>`）时间差/文件大小，一张 PASS/FAIL 表 |
 | `template/audio.template.py` | 乐器、UI 音效、混响、母带；配乐由节拍表 `SECTIONS` 驱动 |
 | `template/fetch-fonts.sh` / `make.sh` | 字体下载 / 一键全流程（末尾自动跑 check.py） |
 
 ## 开始一个新项目
 
+`$V` 是放导演页等源码的目录：被展示页面在仓库根目录附近时用 `video`；页面在子目录（如 `demo-app/index.html`）时用 `demo-app/video`，SPEC 也放 `demo-app/SPEC.md`，保持根目录干净。
+
 ```bash
-cp .claude/skills/promo-video/SPEC.template.md SPEC.md          # 先写 SPEC（参考 SPEC.example.md）
-mkdir -p video && cp -r .claude/skills/promo-video/template/. video/
-mv video/director.template.html video/director.html
-mv video/audio.template.py video/audio.py
-pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
+V=video                                                          # 或 <子目录>/video
+cp .claude/skills/promo-video/SPEC.template.md "$(dirname $V)/SPEC.md"   # 先写 SPEC（参考 SPEC.example.md）
+mkdir -p $V && cp -r .claude/skills/promo-video/template/. $V/
+mv $V/director.template.html $V/director.html
+mv $V/audio.template.py $V/audio.py
+grep -qxF '**/video/out/' .gitignore 2>/dev/null || echo '**/video/out/' >> .gitignore   # 渲染产物不提交
+pip install -q numpy scipy imageio-ffmpeg && $V/fetch-fonts.sh
 ```
 
-不改任何东西直接 `ROOT=. SCALE=0.25 ./video/make.sh` 即可用 demo.html 跑通 8 秒示例。然后在 `video/director.html` 里把 `APP` 指向被展示的页面（相对导演页、必须同源，由 render.mjs 的服务器从 `--root` 提供），再按 SPEC 分镜表逐段写剧本。
+- 先不改任何东西跑一次 `ROOT=. SCALE=0.25 $V/make.sh` 验证环境（约 1 分钟，check.py 应 ALL PASS）。make.sh 会先 `cd` 到 `$V`，`ROOT` 相对 `$V` 解析：这里 `ROOT=.` 是让服务器从 `$V` 提供自带的 `demo.html`；正式项目用默认 `ROOT=..`（`$V` 的上一级，要能覆盖被展示页面）。
+- 然后在 `$V/director.html` 里把 `APP` 指向被展示页面（**相对导演页**，如 `'../index.html'`；必须在 ROOT 之内、同源），再按 SPEC 分镜表逐段写剧本。
+- **被展示页面的视口是 1440×810**（导演页 `#rig`/`#app` 的尺寸），剧本里的指针坐标、镜头 `{x,y}` 都是这个视口里的 CSS 像素；新做的页面按这个尺寸设计，不要出现滚动条。
+- 导演页往 iframe 注入的是 `:root{--font: Inter, "Noto Sans SC", sans-serif}`：页面的 `font-family` 要写成 `var(--font)` 才会换成下载的字体（否则用系统字体，容易出方块字）。
+
+下文命令里的 `video/` 都指 `$V`。
 
 `render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，只缩小输出视频> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
 
 ## 工作流程
 
 1. **写 SPEC**（主会话）：规格、被展示页面与示例数据、分镜表（时间码 | 镜头 | 交互 | 速度坡度 | 标题 | 音乐/音效）、开场结尾文案、风险点、验收清单。分镜表是唯一事实来源，剧本和 `SECTIONS` 都从它翻译。
-2. **冒烟测试风险点**：对每个"没把握的交互"（拖拽库是否认合成事件、过渡是否跟虚拟时间、字体是否加载）写一个 2–3 秒的最小剧本，用 `--scale 0.25 --to 3` 渲染，看 cue 时间差（见下）和几张 still。不通过就先改引擎/剧本，**不要**带着疑问跑全片。
+2. **冒烟测试风险点**：对每个"没把握的交互"（拖拽库是否认合成事件、过渡是否跟虚拟时间、字体是否加载）写一个 2–3 秒的最小剧本，用 `--scale 0.25 --to 3` 渲染，看 cue 时间差（见下）和几张 still。不通过就先改引擎/剧本，**不要**带着疑问跑全片。约定：导演页模板有 `SMOKE = ?smoke` 开关，剧本写成 `if (SMOKE) {...冒烟...} else {...全片...}`，`DURATION`/`RATE`/`END` 用 `SMOKE ? a : b` 在**块外**声明（`drawEnd` 和 `DIRECTOR` 在块外引用它们；块内 `const` 会 ReferenceError，`node --check` 查不出）。运行：
+   `cd <ROOT> && node video/render.mjs --root . --page 'video/director.html?smoke' --outdir video/out/smoke --scale 0.25 --stills 0.5,1.2,2.2`，然后看 `video/out/smoke/cues.json`。页面脚本报错时 render.mjs 会在 1 秒内以退出码 1 结束，原因只在 stderr 的 `[page-exc]` 行里。
 3. **低分辨率关键帧预览**：`node video/render.mjs --no-video --stills 1,5.5,11.8,...`（`--no-video` 不会覆盖 cues.json），再拼成一张图看构图、标题是否压主体：
    `"$FFMPEG" -pattern_type glob -i 'video/out/stills/*.jpg' -vf "scale=480:-1,tile=4x3" -frames:v 1 video/out/contact.jpg`
    注意：`--stills` 仍要从 0 跑到最后一个 still（状态是累积的），只是不编码视频。
@@ -59,6 +69,7 @@ pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 - **不要 `pkill -f <含命令关键字的模式>`**：模式会匹配到执行它的 shell 自己，把会话的 shell 杀掉。用 `killall -9 headless_shell` 或按 pid 杀。
 - **ffmpeg**：用 `pip install imageio-ffmpeg` 自带的二进制（`python3 -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())'`），没有 ffprobe，用 `ffmpeg -i x 2>&1 | grep Duration` 代替。
 - **字体**：`fetch-fonts.sh` 用 Google Fonts CSS API 下载到 `~/.fonts`（Noto Sans SC / Inter / JetBrains Mono，均 SIL OFL），导演页往 iframe 注入字体样式；`DIRECTOR.ready` 等两个文档的 `fonts.ready`。
+- **过渡要整段落在恒定速率里**：check.py 用 `<x>Start` 那一刻的 `r` 算 `Δ × r`；过渡跨越速度坡度的斜坡时只是近似（冒烟里 0.3×→1× 的斜坡让 0.3 s 过渡算成 0.27 s）。要精确验证就让慢镜头窗口比过渡长一截。
 - **音画同步**：音效提示点由导演页 `observe()` 观察真实 DOM 状态生成（幽灵元素出现、加上 `lifted`/`dropping` 类、占位符换位置），不要按剧本时间硬写。每条 cue 带当时的速率 `r`，audio.py 在慢镜头里把音效按 `1/r` 拉长。换了被展示页面就要改 `observe()` 的选择器。
 - **合成事件**：拖拽库若检查 `isTrusted` 就驱动不了，先冒烟测试；需要时改用 CDP `Input.dispatchMouseEvent`（但那样指针坐标要换算到 iframe）。
 - **性能参考**：1920×1080 约 0.3 s/帧，58 s×30 fps 全片约 10 分钟。预览只截 still，不渲染视频；用时间范围（`--to 3`）而不是分辨率来缩短冒烟测试。
@@ -76,7 +87,7 @@ python3 video/check.py video/out/promo.mp4 video/out/cues.json --max-duration 60
 
 - **时长**（≤ `--max-duration`）、**分辨率**、**fps = 30**、**h264 + aac**、**音视频时长差 < 0.1 s**。
 - **blackdetect**：开场淡入（前 0.5 s）和结尾卡（导演页 `END.from` 起，render.mjs 写进 cues.json 的 `endFrom`；也可 `--allow-black-from`）以外不应有黑场；**freezedetect**：列出定格段，超过 3 s 判 FAIL（结尾字幕等有意定格注意时长）。
-- **拖拽 cue 时间差**（证明合成器动画没被跳过）：每对 `dropStart → drop` 的 Δ 与页面时间 `Δ × r`。Δ ≤ 1.5 帧 = 落位动画瞬间结束（ORIGIN 没对齐）→ FAIL；给了 `--expect-transition`（页面自身落位过渡时长，看板/demo 是 0.2 s）时还要求 `Δ × r` 在容差内。
+- **过渡 cue 时间差**（证明合成器动画没被跳过）：每对 `<x>Start → <x>`（拖拽是 `dropStart → drop`，开关可以是 `toggleStart → toggle`）的 Δ 与页面时间 `Δ × r`。Δ ≤ 1.5 帧 = 落位动画瞬间结束（ORIGIN 没对齐）→ FAIL；给了 `--expect-transition`（页面自身过渡时长，看板/demo 落位是 0.2 s；make.sh 用 `EXPECT_TRANSITION=` 传）时还要求 `Δ × r` 在容差内。
 - **文件大小**：分享版（`<NAME>-share.mp4`）必须 < 30 MB。
 
 check.py 管不到的，仍需人工看静帧（先缩小再看）：
@@ -92,6 +103,10 @@ check.py 管不到的，仍需人工看静帧（先缩小再看）：
 
 1. **看类名**：写一个 2–3 秒的小剧本只做一次拖拽，`--no-video --stills 1.9,2.5,3.1` 截几张图，同时在剧本里 `during(1.8, 3.2, () => console.log(D.body.innerHTML.length, [...D.querySelectorAll('[class]')].filter(e => /drag|ghost|lift|drop|placeholder/i.test(e.className)).map(e => e.className)))`，render.mjs 会把页面 console 以 `[page]` 前缀转发到 stderr。
 2. **或挂 MutationObserver**：在 `ready` 之后 `new W.MutationObserver(ms => ms.forEach(m => console.log(T.toFixed(3), m.type, m.target.className, m.attributeName || [...m.addedNodes].map(n => n.className)))).observe(D.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] })`，从 `[page]` 日志里找出拿起/落位/占位换位对应的类或节点增删，确认后删掉。
+
+非拖拽页面（点击弹层、开关、输入）同样按状态转换打 cue，例如 `#sheet` 加上 `.open` → `pop`、开关加上 `.on` → `toggleStart`、过渡结束 → `toggle`。过渡结束在 DOM 上没有痕迹时，可以在页面里用 `transitionend` 写一个标记（如 `body.dataset.settled`）供 observe() 读取——这正是要验证的"合成器动画跟随虚拟时间"。成对的 `<x>Start`/`<x>` 会被 check.py 自动检查。新 cue 类型要在 audio.py 的 `SFX` 里加映射，否则被跳过并打印 `unknown cue type`。
+
+`slowdown`/`speedup`/`whoosh`/`end` 这类跟速度坡度或剪辑点走的 cue 不是 DOM 状态，直接在剧本里 `at(t, () => cue('slowdown'))` 手打，时间取 SPEC 分镜表。
 
 规则：
 

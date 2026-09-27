@@ -147,7 +147,10 @@
 (() => {
   'use strict';
   const FPS = 30;
-  const DURATION = 8; // 示例时长；正式剧本按 SPEC.md 的分镜表改这里
+  // ?smoke：改跑 2–3 秒的冒烟剧本（剧本写成 if (SMOKE) {...} else {...}）。
+  // DURATION / RATE / END 在剧本块外用 SMOKE ? a : b 声明，块内 const 在块外不可见。
+  const SMOKE = new URLSearchParams(location.search).has('smoke');
+  const DURATION = 8; // 示例时长；正式剧本按 SPEC.md 的分镜表改这里（如 SMOKE ? 3 : 10）
   const $ = s => document.querySelector(s);
 
   // 被展示的页面（相对导演页，需同源）；render.mjs 的 --page 可带 ?app= 覆盖。
@@ -229,6 +232,10 @@
   function typeInto(el, text) {
     el.value = text;
     el.dispatchEvent(new W.Event('input', { bubbles: true }));
+  }
+  // 逐字输入：从 t0 起每 dt 秒多打一个字符（每字一条 key cue）；el 可以是返回元素的函数
+  function typeAt(t0, el, text, dt = .08) {
+    for (let i = 1; i <= text.length; i++) at(t0 + (i - 1) * dt, () => { typeInto(typeof el === 'function' ? el() : el, text.slice(0, i)); cue('key'); });
   }
   const ripples = [];
   function ripple() {
@@ -336,6 +343,8 @@
        at(t, fn)                      —— 在时间 t 触发一次性动作（按/放开指针、cue 等）
        during(a, b, fn(t))            —— 在 [a,b] 内每帧调用，写持续变化的状态
        pathTrack([[t,x,y,ease], ...]) —— 让指针沿关键点移动；x/y 可以是惰性求值的函数
+       click() / press() / release()  —— 在指针处派发 pointer/mouse/click 事件
+       typeAt(t0, el, text, dt)       —— 逐字输入（input 事件 + 每字 key cue）；key('Escape') 发 keydown
        shot(a, b, fn(t) => camSpec)   —— 在 [a,b] 内定义镜头（相机位置/缩放/旋转）
        title(a, b, html, opts)        —— 在 [a,b] 内显示一段标题/字幕
        RATE                           —— [t, rate] 数组，控制被展示页面内部“时间流速”（慢动作）
@@ -386,7 +395,7 @@
     return mix({ x: 720, y: 405, z: 1.8, rx: 16, ry: -8, rz: -2 }, { x: 720, y: 405, z: 1.1, rx: 20, ry: 0, rz: 0 }, k);
   });
 
-  /* ================= 结尾字幕（通用，from 到 DURATION 淡入并保持） ================= */
+  /* ================= 结尾字幕（通用，from 到 DURATION 淡入并保持；END 必须留在剧本块外） ================= */
   const END = { from: DURATION - 2, text: 'build by <span class="acc">Model</span>' };
   const CURSOR_UNTIL = DURATION;
   function drawEnd(t) {
