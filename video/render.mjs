@@ -41,6 +41,12 @@ const { FPS, DURATION } = await b.evaluate('({FPS: DIRECTOR.FPS, DURATION: DIREC
 const TO = TO_ARG ?? DURATION;
 const N = Math.round(Math.min(DURATION, Math.max(TO, ...STILLS.map(x => x + 1 / FPS))) * FPS);
 
+// 合成器动画（如带 will-change 的拖拽幽灵）按 BeginFrame 的 frameTimeTicks 计时，
+// 必须和页面的虚拟时钟同一时间基准，否则过渡会瞬间结束。这里测出 performance.now() 的单调时钟原点。
+const mono = () => Number(process.hrtime.bigint()) / 1e6;
+const m0 = mono(); const pn = await b.evaluate('performance.now()'); const m1 = mono();
+const ORIGIN = (m0 + m1) / 2 - pn;
+
 // 虚拟时间：暂停，每帧按“速度坡度”推进
 let waiter = null;
 b.listeners.push(m => { if (m.method === 'Emulation.virtualTimeBudgetExpired' && waiter) { const w = waiter; waiter = null; w(); } });
@@ -61,9 +67,9 @@ const t0 = Date.now();
 const stillFrames = new Set(STILLS.map(s => Math.round(s * FPS)));
 for (let i = 0; i < N; i++) {
   const t = i / FPS;
-  const { rate } = await b.evaluate(`DIRECTOR.frame(${t})`);
+  const { rate, now } = await b.evaluate(`DIRECTOR.frame(${t})`);
   const capture = (t >= FROM - 1e-9 && t < TO) || stillFrames.has(i);
-  const r = await b.beginFrame({ frameTimeTicks: ticks, interval: 1000 / FPS, ...(capture ? { screenshot: { format: 'jpeg', quality: 94 } } : { noDisplayUpdates: false }) });
+  const r = await b.beginFrame({ frameTimeTicks: Math.max(ticks, ORIGIN + now), interval: 1000 / FPS, ...(capture ? { screenshot: { format: 'jpeg', quality: 94 } } : { noDisplayUpdates: false }) });
   if (capture) {
     const buf = r.screenshotData ? Buffer.from(r.screenshotData, 'base64') : last;
     if (!r.screenshotData) console.error(`frame ${i}: no damage, reusing previous`);
@@ -73,7 +79,7 @@ for (let i = 0; i < N; i++) {
   }
   const step = 1000 / FPS * rate;
   vms += step;
-  ticks += step;
+  ticks = Math.max(ticks, ORIGIN + now) + 1e-3;
   await advance(step);
   if (i % 300 === 0) console.error(`frame ${i}/${N}  t=${t.toFixed(2)}s  rate=${rate.toFixed(2)}  ${((Date.now() - t0) / 1000).toFixed(0)}s elapsed`);
 }

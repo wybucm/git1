@@ -194,7 +194,7 @@
 <script>
 (() => {
   'use strict';
-  const FPS = 60;
+  const FPS = 30;
   const DURATION = 58;
   const $ = s => document.querySelector(s);
 
@@ -861,7 +861,7 @@
     drawEnd(t);
     applyFx(t);
     $('#world').style.visibility = t < 4.9 ? 'hidden' : 'visible';
-    return { rate: rateAt(t) };
+    return { rate: rateAt(t), now: performance.now() };
   }
 
   window.DIRECTOR = { FPS, DURATION, ready, frame, cues, rateAt };
