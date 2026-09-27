@@ -15,9 +15,11 @@ description: 为网页或 Web 应用制作宣传片 / 产品演示视频 / 功�
 | `SPEC.example.md` | 完整范例：`trello/index.html` 的 58 秒看板宣传片（成片源码在仓库 `video/`） |
 | `template/cdp.mjs` | 极简 CDP 客户端（headless_shell、确定性模式、BeginFrame 控制） |
 | `template/render.mjs` | 静态服务器 + 逐帧渲染 + 导出 cues.json |
-| `template/director.template.html` | 导演页引擎 + 2–3 段示例剧本 |
+| `template/director.template.html` | 导演页引擎 + 8 秒示例剧本（默认展示 `demo.html`） |
+| `template/demo.html` | 自带演示页（Pointer 事件拖拽卡片，类名与 `observe()` 一致），模板在任何仓库都能直接跑通 |
+| `template/check.py` | 自动自查：时长/分辨率/fps/编码/音视频差/黑场/定格/拖拽 cue 时间差/文件大小，一张 PASS/FAIL 表 |
 | `template/audio.template.py` | 乐器、UI 音效、混响、母带；配乐由节拍表 `SECTIONS` 驱动 |
-| `template/fetch-fonts.sh` / `make.sh` | 字体下载 / 一键全流程 |
+| `template/fetch-fonts.sh` / `make.sh` | 字体下载 / 一键全流程（末尾自动跑 check.py） |
 
 ## 开始一个新项目
 
@@ -29,7 +31,7 @@ mv video/audio.template.py video/audio.py
 pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 ```
 
-在 `video/director.html` 里把 `APP` 指向被展示的页面（相对导演页、必须同源，由 render.mjs 的服务器从 `--root` 提供），再按 SPEC 分镜表逐段写剧本。
+不改任何东西直接 `ROOT=. SCALE=0.25 ./video/make.sh` 即可用 demo.html 跑通 8 秒示例。然后在 `video/director.html` 里把 `APP` 指向被展示的页面（相对导演页、必须同源，由 render.mjs 的服务器从 `--root` 提供），再按 SPEC 分镜表逐段写剧本。
 
 `render.mjs` 参数：`--root <服务根目录，默认 cwd> --page <相对 root 的导演页，默认 video/director.html，可带 ?app=...> --outdir <默认导演页旁的 out/> --out <mp4> --scale <0.25 等，只缩小输出视频> --width 1920 --height 1080 --crf 15 --from <秒> --to <秒> --stills 3.9,11.8 --no-video`。FPS 和时长来自 `DIRECTOR.FPS / DIRECTOR.DURATION`。
 
@@ -48,7 +50,7 @@ pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 
 ## 已知坑（每条都付出过代价）
 
-- **浏览器**：用 Playwright 自带的 `chromium_headless_shell`（`/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell`，或设 `HEADLESS_SHELL`），参数 `--deterministic-mode --enable-begin-frame-control --run-all-compositor-stages-before-draw --disable-threaded-animation`。页面要在**新的 browser context** 里用 `Target.createTarget({ enableBeginFrameControl: true })` 创建。**导航期间也必须持续调用 `HeadlessExperimental.beginFrame`**，否则页面永远不加载（cdp.mjs 的 `navigate` 已处理）。
+- **浏览器**：用 Playwright 自带的 `chromium_headless_shell`（`/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell`，或设 `HEADLESS_SHELL`）。cdp.mjs 的自动探测**只找 `/opt/pw-browsers`**（云端容器的路径）；本地要先 `npx playwright install chromium-headless-shell`，再把 `HEADLESS_SHELL` 设成它装出来的 `headless_shell` 路径（如 `~/.cache/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell`，macOS 为 `chrome-mac/headless_shell`）。参数 `--deterministic-mode --enable-begin-frame-control --run-all-compositor-stages-before-draw --disable-threaded-animation`。页面要在**新的 browser context** 里用 `Target.createTarget({ enableBeginFrameControl: true })` 创建。**导航期间也必须持续调用 `HeadlessExperimental.beginFrame`**，否则页面永远不加载（cdp.mjs 的 `navigate` 已处理）。
 - **时间控制**：`Emulation.setVirtualTimePolicy` 先 `pause`，每帧 `advance` 并传 `budget = 1000/fps × rate`，等 `Emulation.virtualTimeBudgetExpired` 事件。这样 setTimeout、CSS 过渡、`performance.now()` 都跟随虚拟时间，慢镜头是真实慢放而不是插帧。
 - **`frameTimeTicks` 必须等于 `ORIGIN + 页面的 performance.now()`**。ORIGIN 要在**暂停虚拟时间之前**测：`process.hrtime` 取两次夹住一次 `evaluate('performance.now()')`，`ORIGIN = 中点 - pn`。否则合成器线程上的动画（比如带 `will-change: transform` 的拖拽幽灵元素的落位过渡）按真实时钟走，会瞬间结束 —— 上一轮因此白跑了一次全片渲染。冒烟测试一定要验这一条。
 - **iframe 必须同源**才能被导演脚本控制，所以要用 http 服务器（render.mjs 自带），不能用 `file://`。
@@ -64,21 +66,39 @@ pip install -q numpy scipy imageio-ffmpeg && ./video/fetch-fonts.sh
 
 ## 自查清单（交付前逐项跑，结果写进汇报）
 
+make.sh 结束时会自动运行（也可单独跑）：
+
 ```bash
-FF="$(python3 -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())')"
-"$FF" -i video/out/promo.mp4 2>&1 | grep -E "Duration|Stream"          # 时长、1920x1080、30 fps、h264 + aac
-"$FF" -i video/out/promo.mp4 -vf blackdetect=d=0.3:pix_th=0.05 -an -f null - 2>&1 | grep black_start   # 除开场淡入/有意黑场外应为空
-"$FF" -i video/out/promo.mp4 -vf freezedetect=n=0.001:d=1.5 -an -f null - 2>&1 | grep freeze_start    # 定格只允许出现在结尾字幕等有意的地方
+python3 video/check.py video/out/promo.mp4 video/out/cues.json --max-duration 60 --expect-transition 0.2
 ```
 
-- **时长**：≤ SPEC 上限，音视频时长差 < 0.1 s。
-- **关键交互的 cue 时间差**（证明合成器动画没被跳过）：从 `out/cues.json` 取每次拖拽的 `dropStart → drop`，换算成页面时间 `Δ × r` 应接近页面自身的落位过渡时长（看板是 ~0.2–0.3 s）；若 Δ ≈ 一帧（0.033 s）说明落位动画瞬间结束 = ORIGIN 没对齐。`lift`、`flip` 同理检查存在且顺序正确。
-  ```bash
-  python3 -c "import json;c=json.load(open('video/out/cues.json'))['cues'];[print(a['t'],b['t'],round(b['t']-a['t'],3),a['r']) for a,b in zip(c,c[1:]) if a['type']=='dropStart' and b['type']=='drop']"
-  ```
+输出一张 PASS/FAIL 表，任一 FAIL 则退出码非 0：
+
+- **时长**（≤ `--max-duration`）、**分辨率**、**fps = 30**、**h264 + aac**、**音视频时长差 < 0.1 s**。
+- **blackdetect**：开场淡入（前 0.5 s）以外不应有黑场；**freezedetect**：列出定格段，超过 3 s 判 FAIL（结尾字幕等有意定格注意时长）。
+- **拖拽 cue 时间差**（证明合成器动画没被跳过）：每对 `dropStart → drop` 的 Δ 与页面时间 `Δ × r`。Δ ≤ 1.5 帧 = 落位动画瞬间结束（ORIGIN 没对齐）→ FAIL；给了 `--expect-transition`（页面自身落位过渡时长，看板/demo 是 0.2 s）时还要求 `Δ × r` 在容差内。
+- **文件大小**：分享版（`<NAME>-share.mp4`）必须 < 30 MB。
+
+check.py 管不到的，仍需人工看静帧（先缩小再看）：
+
 - **结尾文字**：截结尾 still 核对文案逐字一致（包括大小写和括号）。
 - **标题不压主体**、没有未加载字体的方块字、没有滚动条：看关键帧拼图。
+- `lift`、`flip` 等其他 cue 存在且顺序正确。
 - **`[page-exc]`**：渲染日志里不应有页面异常；`frame N: no damage` 偶尔出现可以接受，大量出现说明画面没更新。
+
+## 给新页面写 observe()
+
+`observe()` 每帧在 `frame(t)` 里跑一次，比较上一帧与这一帧的 DOM 状态，状态**变化**的那一帧打 cue。换页面时先弄清"交互开始/结束"在 DOM 上表现为什么：
+
+1. **看类名**：写一个 2–3 秒的小剧本只做一次拖拽，`--no-video --stills 1.9,2.5,3.1` 截几张图，同时在剧本里 `during(1.8, 3.2, () => console.log(D.body.innerHTML.length, [...D.querySelectorAll('[class]')].filter(e => /drag|ghost|lift|drop|placeholder/i.test(e.className)).map(e => e.className)))`，render.mjs 会把页面 console 以 `[page]` 前缀转发到 stderr。
+2. **或挂 MutationObserver**：在 `ready` 之后 `new W.MutationObserver(ms => ms.forEach(m => console.log(T.toFixed(3), m.type, m.target.className, m.attributeName || [...m.addedNodes].map(n => n.className)))).observe(D.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] })`，从 `[page]` 日志里找出拿起/落位/占位换位对应的类或节点增删，确认后删掉。
+
+规则：
+
+- **按状态转换打 cue，不按剧本时间打**：`at(4.2, release)` 之后落位动画何时结束由页面（和速度坡度）决定，只有观察 DOM 才对得上。
+- **每条 cue 自动带 `r`**（`cue()` 已写入当前速率），audio.py 据此在慢镜头里拉长音效；不要自己换算时间。
+- **一次转换只打一条**：用 `watch` 记住上一帧状态，只在 false→true（或节点消失）那一帧打；轮询条件本身不要打 cue。
+- **isTrusted 兜底**：若页面检查 `event.isTrusted`（合成事件被忽略、幽灵不出现），改用可信输入：导演页的 `fire()` 不直接 dispatchEvent，而是把 `{type, x, y, buttons}` 推进 `window.PENDING_INPUT`，render.mjs 在每帧 `frame(t)` 之后取出并用 CDP `Input.dispatchMouseEvent`（`mousePressed/mouseMoved/mouseReleased`）派发；坐标 = iframe 内坐标 + iframe 在导演页中的偏移（导演页相机有 3D 变换时要按未变换的布局坐标算，最好在派发那几帧把相机置为单位变换）。observe() 不用改。
 
 ## 交付
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Promo Video — Director</title>
 <!--
-  导演页模板：把真实的页面（默认 ../trello/index.html，可用 ?app= 覆盖）放进 iframe，
+  导演页模板：把真实的页面（默认同目录的 demo.html，可用 ?app= 覆盖）放进 iframe，
   用脚本驱动真实的指针交互，外层用 CSS 3D 做镜头运动、景深与调色。
   所有画面都是时间 t 的确定性函数，由 render.mjs 逐帧调用 DIRECTOR.frame(t) 并截图。
 
@@ -150,8 +150,10 @@
   const DURATION = 8; // 示例时长；正式剧本按 SPEC.md 的分镜表改这里
   const $ = s => document.querySelector(s);
 
-  // 被展示的页面（相对导演页，需同源）；render.mjs 的 --page 可带 ?app= 覆盖
-  const APP = new URLSearchParams(location.search).get('app') || '../trello/index.html';
+  // 被展示的页面（相对导演页，需同源）；render.mjs 的 --page 可带 ?app= 覆盖。
+  // 默认是同目录下自带的 demo.html，模板可在任何仓库直接跑通；正式项目改成真实页面，例如：
+  //   const APP = new URLSearchParams(location.search).get('app') || '../trello/index.html';
+  const APP = new URLSearchParams(location.search).get('app') || 'demo.html';
 
   /* ================= 工具 ================= */
   const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
@@ -340,7 +342,7 @@
        fx.xxx                         —— 在 during() 里写景深/动态模糊/黑边/闪光等参数
        cue(type, extra)               —— 记一个音效提示点，供 audio.py 生成配乐
 
-     下面是针对 ../trello/index.html 的一个 8 秒示例，仅作为写法参考，
+     下面是针对自带 demo.html（.list / .card）的一个 8 秒示例，仅作为写法参考，
      正式项目应删除或替换成自己的分镜。
      ========================================================================= */
 
@@ -478,7 +480,7 @@
   }
 
   // 观察被展示页面内部的真实状态，自动生成音效提示（保证音画同步）
-  // 按被展示页面的类名改这里：下面这套规则匹配 ../trello/index.html 的拖拽实现
+  // 按被展示页面的类名改这里：下面这套规则匹配自带 demo.html 与 ../trello/index.html 的拖拽实现（写法见 SKILL.md“给新页面写 observe()”）
   const watch = { ghost: false, lifted: false, dropping: false, phParent: null, phIndex: -1 };
   function observe() {
     const g = q('.drag-ghost');
