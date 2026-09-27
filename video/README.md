@@ -2,6 +2,8 @@
 
 `trello/index.html` 的 58 秒宣传片，画面和声音全部由代码生成。
 
+> 这套流水线已整理成可复用的项目 skill：[`.claude/skills/promo-video/`](../.claude/skills/promo-video/SKILL.md)（流程、已知坑、自查清单、通用引擎模板 `template/`）。本片的完整 SPEC 见 [`SPEC.example.md`](../.claude/skills/promo-video/SPEC.example.md)。给别的网页做宣传片时，从 skill 的模板开始，不要复制本目录。
+
 | 文件 | 作用 |
 | --- | --- |
 | `director.html` | 导演页。把真实的看板放进 iframe，脚本派发真实的 Pointer/Mouse/Keyboard 事件来驱动拖拽、弹窗、搜索、换背景、切主题；外层用 CSS 3D 做推拉摇移、景深（双层 backdrop 模糊）、动态模糊、遮幅、闪白、胶片颗粒和标题。画面是时间 `t` 的确定性函数。 |
