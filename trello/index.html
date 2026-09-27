@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>看板</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <rect x="1" y="1" width="22" height="22" rx="5" fill="currentColor" opacity=".28"/>
+        <rect x="5" y="5" width="6" height="13" rx="1.6" fill="currentColor"/>
+        <rect x="13" y="5" width="6" height="8" rx="1.6" fill="currentColor"/>
+      </svg>
+      <span class="brand-text">看板</span>
+    </div>
+    <span class="divider"></span>
+    <h1 id="board-title" class="board-title" data-action="edit-board-title" tabindex="0" title="点击重命名看板"></h1>
+    <button id="star-btn" class="top-btn icon star-btn" data-action="star" data-icon="star" aria-label="收藏看板"></button>
+    <span class="spacer"></span>
+    <label class="search" data-icon="search">
+      <input id="search" type="search" placeholder="搜索卡片" autocomplete="off" aria-label="搜索卡片">
+      <kbd class="kbd">/</kbd>
+    </label>
+    <button id="filter-btn" class="top-btn" data-action="open-filter" data-icon="filter">
+      <span class="btn-text">筛选</span><span class="count-badge" hidden></span>
+    </button>
+    <button class="top-btn" data-action="open-bg" data-icon="palette"><span class="btn-text">背景</span></button>
+    <button class="top-btn icon" data-action="open-menu" data-icon="dots" aria-label="更多"></button>
+  </header>
+
+  <div id="filter-bar" class="filter-bar" hidden></div>
+
+  <main id="canvas" class="canvas">
+    <div id="board" class="board"></div>
+  </main>
+
+  <div id="popover" class="popover" hidden></div>
+
+  <div id="overlay" class="overlay" hidden>
+    <div id="modal" class="modal" role="dialog" aria-modal="true" aria-label="卡片详情"></div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input id="import-file" type="file" accept=".json,application/json" hidden>
+
+  <script src="app.js"></script>
+</body>
+</html>
