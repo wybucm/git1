@@ -8,7 +8,7 @@
 //   --root    静态 HTTP 服务器的根目录（同源 iframe 需要），默认当前工作目录
 //   --page    导演页相对 root 的路径（可带 ?query），默认 video/director.html
 //   --outdir  输出目录，stills 存到 <outdir>/stills，cues 存到 <outdir>/cues.json；
-//             默认 <page 所在目录>/out（相对 root 解析）
+//             默认 <root>/<page 所在目录>/out；显式传入时相对当前工作目录解析
 //   --out     视频文件路径，默认 <outdir>/video.mp4（相对当前工作目录解析）
 //   --scale   截图设备像素比，默认 1；低分辨率预览/冒烟测试用（如 0.25 → 480×270）
 //   --width   导演页宽度（CSS 像素），默认 1920
@@ -31,7 +31,7 @@ const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filt
 const ROOT = path.resolve(CWD, args.root || '.');
 const PAGE = args.page || 'video/director.html';
 const PAGE_PATH = PAGE.split('?')[0];
-const OUTDIR = path.resolve(ROOT, args.outdir || path.join(path.dirname(PAGE_PATH), 'out'));
+const OUTDIR = args.outdir ? path.resolve(CWD, args.outdir) : path.resolve(ROOT, path.dirname(PAGE_PATH), 'out');
 const OUT = path.resolve(CWD, args.out || path.join(OUTDIR, 'video.mp4'));
 const SCALE = args.scale != null ? +args.scale : 1;
 const WIDTH = args.width != null ? +args.width : 1920;
