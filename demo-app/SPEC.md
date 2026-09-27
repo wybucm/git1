@@ -1,6 +1,6 @@
 # SPEC：Hue 调色板生成器 10 秒宣传片
 
-> 复制自 `.claude/skills/promo-video/SPEC.template.md`。分镜表是剧本（`demo-app/video/director.html`）和配乐节拍表（`demo-app/video/audio.py`）的唯一事实来源。
+> 复制自 `.claude/skills/promo-video/SPEC.template.md`（放在 `demo-app/`，源码目录 `$V = demo-app/video`）。分镜表是剧本（`demo-app/video/director.html`）和配乐节拍表（`demo-app/video/audio.py`）的唯一事实来源。
 
 ## 1. 规格
 
