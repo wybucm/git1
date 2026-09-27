@@ -10,4 +10,8 @@ node render.mjs --out out/video.mp4          # 视频画面 + out/cues.json（�
 python3 audio.py out/cues.json out/audio.wav  # 代码合成的配乐与音效
 "$FFMPEG" -y -loglevel error -i out/video.mp4 -i out/audio.wav \
   -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -ar 48000 -shortest -movflags +faststart out/kanban-promo.mp4
-echo "✔ out/kanban-promo.mp4"
+# 便于分享的压缩版（两遍编码，约 27 MB）
+"$FFMPEG" -y -loglevel error -i out/video.mp4 -c:v libx264 -preset slower -b:v 3700k -pass 1 -passlogfile out/x264 -an -f null /dev/null
+"$FFMPEG" -y -loglevel error -i out/video.mp4 -i out/audio.wav -map 0:v -map 1:a -c:v libx264 -preset slower -b:v 3700k -pass 2 \
+  -passlogfile out/x264 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 -shortest -movflags +faststart out/kanban-promo-share.mp4
+echo "✔ out/kanban-promo.mp4  out/kanban-promo-share.mp4"
